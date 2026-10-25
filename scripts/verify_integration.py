@@ -172,15 +172,21 @@ def main() -> int:
     check("token usage recorded", usage_after > usage_before)
 
     print("\n== S5 Gamification ==")
-    play = student.post("/api/v1/gamification/play", {"game_type": "quick_quest", "correct": 8, "total": 10, "elapsed_seconds": 20, "source_event_id": str(uuid.uuid4())})
+    forged = student.post("/api/v1/gamification/play", {"game_type": "quick_quest", "correct": 8, "total": 10, "elapsed_seconds": 20, "source_event_id": str(uuid.uuid4())})
+    check("client-supplied score is rejected", forged.status_code == 422, forged.text)
+    deck = student.get("/api/v1/practice-deck", params={"game": "quick_quest"})
+    answers = [{"question_id": item["id"], "value": item["options"][0]} for item in deck.json().get("questions", [])]
+    play = student.post("/api/v1/practice-deck/submit", {"game": "quick_quest", "answers": answers, "elapsed_seconds": 20, "source_event_id": str(uuid.uuid4())})
     check("quick quest awards XP", play.status_code == 200 and play.json()["xp_awarded"] > 0, play.text)
     if play.status_code == 200:
-        board = play.json()
+        board = student.get("/api/v1/gamification").json()
         check("rank computed for learner", board["rank"] >= 1 and board["total_xp"] > 0, str(board["rank"]))
         check("leaderboard ordered", [r["xp"] for r in board["leaderboard"]] == sorted((r["xp"] for r in board["leaderboard"]), reverse=True))
     event = str(uuid.uuid4())
-    first = student.post("/api/v1/gamification/play", {"game_type": "quiz", "correct": 5, "total": 10, "elapsed_seconds": 30, "source_event_id": event}).json()
-    second = student.post("/api/v1/gamification/play", {"game_type": "quiz", "correct": 5, "total": 10, "elapsed_seconds": 30, "source_event_id": event}).json()
+    quiz_deck = student.get("/api/v1/practice-deck", params={"game": "quiz"}).json().get("questions", [])
+    quiz_answers = [{"question_id": item["id"], "value": item["options"][0]} for item in quiz_deck]
+    first = student.post("/api/v1/practice-deck/submit", {"game": "quiz", "answers": quiz_answers, "elapsed_seconds": 30, "source_event_id": event}).json()
+    second = student.post("/api/v1/practice-deck/submit", {"game": "quiz", "answers": quiz_answers, "elapsed_seconds": 30, "source_event_id": event}).json()
     check("replayed event not double-counted", second["xp_awarded"] == 0 and first["total_xp"] == second["total_xp"])
     games = student.get("/api/v1/gamification").json()["games"]
     check("all four games listed", {g["id"] for g in games} >= {"quiz", "quick_quest", "flashcards", "daily"})

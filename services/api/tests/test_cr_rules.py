@@ -18,7 +18,7 @@ from app.schemas import GamePlayRequest, PracticeSubmit
 from app.security.rbac import COORDINATOR_ROLES, STUDENT_ROLES, TEACHER_ROLES, require_any
 from app.api.v1.academics import require_timezone
 from app.services.grading import grade_objective
-from app.services.integrity import integrity_rules, missing_checks
+from app.services.integrity import identity_matches, integrity_rules, missing_checks
 from app.services.learning_path import sequence_status
 
 
@@ -37,6 +37,13 @@ def test_learning_path_locks_until_the_previous_lesson_is_complete() -> None:
     assert sequence_status([False, False]) == ["ready", "locked"]
     assert sequence_status([True, False, False]) == ["complete", "ready", "locked"]
     assert sequence_status([True, True]) == ["complete", "complete"]
+
+
+def test_identity_must_match_the_signed_in_account() -> None:
+    assert identity_matches("Aarav Sharma", display_name="Aarav Sharma", email="aarav.sharma@inteluniven.edu")
+    assert identity_matches("aarav.sharma@inteluniven.edu", display_name="Aarav Sharma", email="aarav.sharma@inteluniven.edu")
+    assert not identity_matches("Someone Else", display_name="Aarav Sharma", email="aarav.sharma@inteluniven.edu")
+    assert not identity_matches("  ", display_name="Aarav Sharma", email=None)
 
 
 def test_timezone_must_be_a_real_zone() -> None:

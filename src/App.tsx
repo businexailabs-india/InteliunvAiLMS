@@ -308,7 +308,9 @@ function CourseDetail({ title, navigate }: { title: string; navigate: (module: s
   const courseId=title.startsWith("cid:")?title.slice(4):"";
   const local=courseId?undefined:syntheticCourses.find(item=>item.title===title);
   const [remote,setRemote]=useState<CourseRecord|null>(null);
-  const [apiLessons,setApiLessons]=useState<{id:string;title:string}[]>([]);
+  const [apiLessons,setApiLessons]=useState<{id:string;title:string;status?:string}[]>([]);
+  const [resumeIndex,setResumeIndex]=useState(0);
+  const [pathPct,setPathPct]=useState<number|null>(null);
   const [note,setNote]=useState("");
   useEffect(()=>{
     if(!courseId||!getStoredToken()) return;
@@ -317,13 +319,19 @@ function CourseDetail({ title, navigate }: { title: string; navigate: (module: s
       setRemote(match);
       if(!match) setNote("This course is not in your catalog.");
     }).catch(err=>setNote(err instanceof Error?err.message:"Could not load this course"));
-    apiFetch<{id:string;title:string}[]>(`/api/v1/courses/${courseId}/lessons`).then(setApiLessons).catch(()=>setApiLessons([]));
+    apiFetch<{progress_pct:number;lessons:{id:string;title:string;status:string}[]}>(`/api/v1/learning-paths?course_id=${courseId}`).then(path=>{
+      setApiLessons(path.lessons);
+      setPathPct(path.progress_pct);
+      const ready=path.lessons.findIndex(lesson=>lesson.status==="ready");
+      const open=path.lessons.findIndex(lesson=>lesson.status!=="complete");
+      setResumeIndex(ready>=0?ready:open>=0?open:0);
+    }).catch(()=>setApiLessons([]));
   },[courseId]);
   const displayTitle=remote?.title||local?.title||(courseId?"Loading course":title);
   const description=remote?.description||local?.desc||"Lessons and progress stay inside this course.";
   const code=local?.code||(remote?.level||"COURSE").slice(0,8).toUpperCase();
   const icon=(local?.icon||"book") as IconName;
-  const progress=local?.progress||`${remote?.progress_pct??0}%`;
+  const progress=pathPct!=null?`${pathPct}%`:local?.progress||`${remote?.progress_pct??0}%`;
   const outline=apiLessons.length?apiLessons.map(item=>item.title):lessonsForCourse(displayTitle, local?.category||remote?.level||displayTitle);
   const openLesson=(index:number)=>{
     if(courseId&&apiLessons[index]) navigate("Courses","My Courses",`lesson:${courseId}:${apiLessons[index].id}:${encodeURIComponent(apiLessons[index].title)}`);
@@ -333,7 +341,7 @@ function CourseDetail({ title, navigate }: { title: string; navigate: (module: s
     <section className="course-hero">
       <div className="course-hero-art"><span>{code}</span><Icon name={icon} size={72}/></div>
       <div className="course-hero-copy"><Badge tone="success">{courseId?"ENROLLED COURSE":"SAMPLE COURSE"}</Badge><h1>{displayTitle}</h1><p>{description}</p>{note&&<p>{note}</p>}<div className="hero-meta"><span><Icon name="book"/> {outline.length} lessons</span><span><Icon name="clock"/> This course only</span></div><div className="progress-label"><span>Your progress</span><strong>{progress}</strong></div><div className="progress big"><span style={{ width: progress }}/></div></div>
-      <Button variant="primary" icon="play" onClick={() => openLesson(0)}>Continue lesson</Button>
+      <Button variant="primary" icon="play" onClick={() => openLesson(resumeIndex)}>Continue lesson</Button>
     </section>
     <div className="content-grid">
       <section className="card span-2"><div className="section-head"><div><span className="eyebrow">CURRICULUM</span><h2>Lessons in {displayTitle}</h2></div><span className="muted">{outline.length} lessons</span></div>
@@ -351,22 +359,26 @@ function Lesson({ detail, navigate }: { detail: string; navigate: (module: strin
   const localTitle=parts[1]==="local"?decodeURIComponent(parts[2]||"Lesson"):"";
   const lessonTitle=decodeURIComponent(parts.at(-1)||"")||localTitle||"Lesson";
   const backTarget=courseId?`cid:${courseId}`:localTitle;
-  const [siblings,setSiblings]=useState<{id:string;title:string}[]>([]);
+  const [siblings,setSiblings]=useState<{id:string;title:string;completed?:boolean}[]>([]);
   const [progressNote,setProgressNote]=useState("");
-  useEffect(()=>{
+  const loadPath=()=>{
     if(!courseId||!getStoredToken()) return;
-    apiFetch<{id:string;title:string}[]>(`/api/v1/courses/${courseId}/lessons`).then(setSiblings).catch(()=>setSiblings([]));
-  },[courseId]);
+    apiFetch<{lessons:{id:string;title:string;completed:boolean}[]}>(`/api/v1/learning-paths?course_id=${courseId}`).then(path=>setSiblings(path.lessons)).catch(()=>setSiblings([]));
+  };
+  useEffect(()=>{loadPath();},[courseId]);
   const completeLesson=async()=>{
     if(!lessonId){setProgressNote("This sample lesson stays on this course. Sign in with a live course to save progress.");return;}
     try{
       await apiFetch("/api/v1/progress",{method:"POST",body:JSON.stringify({lesson_id:lessonId})});
       setProgressNote(`Progress saved for ${lessonTitle}`);
+      loadPath();
     }catch(err){setProgressNote(err instanceof Error?err.message:"Could not save progress");}
   };
+  const completedCount=siblings.filter(item=>item.completed).length;
+  const progressPct=siblings.length?Math.round(100*completedCount/siblings.length):0;
   const outline=siblings.length?siblings.map(item=>item.title):lessonsForCourse(localTitle||lessonTitle, localTitle||lessonTitle);
   return <div className="lesson-layout">
-    <aside className="lesson-nav card"><div className="eyebrow">{localTitle||"THIS COURSE"}</div><h2>{lessonTitle}</h2><div className="lesson-progress"><div className="progress"><span style={{width:"40%"}}/></div><small>{outline.length} lessons in this course</small></div>{outline.map((name,i)=><button className={name===lessonTitle?"active":""} key={`${name}-${i}`} onClick={()=>courseId&&siblings[i]?navigate("Courses","My Courses",`lesson:${courseId}:${siblings[i].id}:${encodeURIComponent(siblings[i].title)}`):navigate("Courses","My Courses",`lesson:local:${encodeURIComponent(localTitle||lessonTitle)}:${i}:${encodeURIComponent(name)}`)}><span>{i+1}</span><div><strong>{name}</strong><small>Same course</small></div></button>)}</aside>
+    <aside className="lesson-nav card"><div className="eyebrow">{localTitle||"THIS COURSE"}</div><h2>{lessonTitle}</h2><div className="lesson-progress"><div className="progress"><span style={{width:`${siblings.length?progressPct:0}%`}}/></div><small>{siblings.length?`${completedCount} of ${siblings.length} lessons complete`:`${outline.length} lessons in this course`}</small></div>{outline.map((name,i)=><button className={name===lessonTitle?"active":""} key={`${name}-${i}`} onClick={()=>courseId&&siblings[i]?navigate("Courses","My Courses",`lesson:${courseId}:${siblings[i].id}:${encodeURIComponent(siblings[i].title)}`):navigate("Courses","My Courses",`lesson:local:${encodeURIComponent(localTitle||lessonTitle)}:${i}:${encodeURIComponent(name)}`)}><span>{i+1}</span><div><strong>{name}</strong><small>Same course</small></div></button>)}</aside>
     <main className="lesson-main">
       <div className="lesson-content"><Badge tone="ai">CURRENT LESSON</Badge><h1>{lessonTitle}</h1><p>This lesson belongs to {localTitle||"the course you opened"}. Marking it complete records progress for this lesson only.</p><div className="lesson-actions"><Button onClick={()=>navigate("Courses","My Courses",backTarget)}>Back to course</Button><Button icon="spark" onClick={()=>navigate("AI Study Buddy")}>Ask AI about this</Button><Button variant="primary" onClick={completeLesson}>Mark complete</Button></div>{progressNote&&<small className="ai-disclaimer">{progressNote}</small>}</div>
     </main>
@@ -1006,7 +1018,7 @@ function GamificationDeepDive({sub,detail,navigate,role}:{sub:string;detail:stri
   const [recommendationReviewed,setRecommendationReviewed]=useState(false);
   if(sub==="Game Library") return <GameLibrary role={role} navigate={navigate}/>;
   if(sub==="QuickQuest") return <PracticeGame game="quick_quest" title="Quick Quest" navigate={navigate}/>;
-  if(sub==="Quiz Challenge") return ["Teacher / Faculty","Administrator"].includes(role)?<LiveQuizArena detail={detail} navigate={navigate}/>:<PracticeGame game="quiz" title="Quiz Challenge" navigate={navigate}/>;
+  if(sub==="Quiz Challenge") return <PracticeGame game="quiz" title="Quiz Challenge" navigate={navigate}/>;
   if(sub==="Flashcards") return <FlashcardsGame navigate={navigate}/>;
   if(sub==="Game Configuration") return <GameConfiguration navigate={navigate}/>;
   const data=gamificationWorkspaces[sub]||gamificationWorkspaces.Achievements;

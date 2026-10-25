@@ -152,7 +152,9 @@ class AssignmentCreate(BaseModel):
 
 
 class SubmissionCreate(BaseModel):
-    body: str
+    body: str = ""
+    attachment_name: str = Field(default="", max_length=240)
+    attachment_text: str = Field(default="", max_length=20000)
 
 
 class GamePlayRequest(BaseModel):
@@ -255,7 +257,10 @@ class ProctorStartRequest(BaseModel):
     consent: bool
     camera_ready: bool = False
     microphone_ready: bool = False
+    camera_label: str = ""
+    microphone_label: str = ""
     identity_confirmed: bool = False
+    identity_name: str = ""
 
 
 class PracticeAnswer(BaseModel):

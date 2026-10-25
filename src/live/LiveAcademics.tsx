@@ -443,9 +443,9 @@ type AssignmentRow = {
   max_score: number;
   due_at?: string | null;
   submission_count?: number;
-  submission?: { id: string; status: string; score: number | null; feedback: string } | null;
+  submission?: { id: string; status: string; score: number | null; feedback: string; submitted_at?: string | null; attachment_name?: string } | null;
 };
-type SubmissionRow = { id: string; student_name: string; body: string; status: string; score: number | null; feedback: string };
+type SubmissionRow = { id: string; student_name: string; body: string; status: string; score: number | null; feedback: string; submitted_at?: string | null; attachment_name?: string };
 
 /** Assignments for learners (submit, see feedback) and staff (create, review, grade). */
 export function LiveAssignments() {
@@ -459,6 +459,7 @@ export function LiveAssignments() {
   const [open, setOpen] = useState("");
   const submissions = useApi<SubmissionRow[]>(open && !learnerOnly ? `/api/v1/assignments/${open}/submissions` : null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [files, setFiles] = useState<Record<string, { name: string; text: string }>>({});
   const [grades, setGrades] = useState<Record<string, { score: string; feedback: string }>>({});
   const action = useAction();
 
@@ -534,24 +535,41 @@ export function LiveAssignments() {
               Score {item.submission.score}/{item.max_score}. {item.submission.feedback}
             </p>
           ) : null}
-          {learnerOnly && !item.submission ? (
+          {learnerOnly && item.submission?.submitted_at ? <small>Submitted {new Date(item.submission.submitted_at).toLocaleString()}{item.submission.attachment_name ? ` · ${item.submission.attachment_name}` : ""}</small> : null}
+          {learnerOnly ? (
             <div className="form-grid">
               <label>
                 Your submission
                 <textarea value={drafts[item.id] ?? ""} onChange={(event) => setDrafts({ ...drafts, [item.id]: event.target.value })} />
               </label>
+              <label>
+                Text file
+                <input
+                  type="file"
+                  accept=".txt,.md,.csv,text/plain"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    file.text().then((text) => setFiles({ ...files, [item.id]: { name: file.name, text: text.slice(0, 20000) } }));
+                  }}
+                />
+              </label>
               <Btn
                 variant="primary"
-                disabled={!(drafts[item.id] ?? "").trim() || action.busy}
+                disabled={(!(drafts[item.id] ?? "").trim() && !(files[item.id]?.text ?? "").trim()) || action.busy}
                 onClick={() =>
                   action.run(async () => {
-                    await send("POST", `/api/v1/assignments/${item.id}/submissions`, { body: drafts[item.id] });
+                    await send("POST", `/api/v1/assignments/${item.id}/submissions`, {
+                      body: drafts[item.id] ?? "",
+                      attachment_name: files[item.id]?.name ?? "",
+                      attachment_text: files[item.id]?.text ?? "",
+                    });
                     list.reload();
-                    return "Submission received.";
+                    return item.submission ? "Submission updated." : "Submission received.";
                   })
                 }
               >
-                Submit
+                {item.submission ? "Update submission" : "Submit"}
               </Btn>
             </div>
           ) : null}
@@ -566,7 +584,7 @@ export function LiveAssignments() {
                   <div className="audit-row" key={sub.id}>
                     <span>
                       <strong>{sub.student_name}</strong>
-                      <small>{sub.body}</small>
+                      <small>{sub.body}{sub.attachment_name ? ` · File ${sub.attachment_name}` : ""}{sub.submitted_at ? ` · ${new Date(sub.submitted_at).toLocaleString()}` : ""}</small>
                     </span>
                     <input
                       aria-label="Score"

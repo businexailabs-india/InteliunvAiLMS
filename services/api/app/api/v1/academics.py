@@ -107,11 +107,13 @@ async def list_assignments(
     if ids:
         if learner:
             for sub in await session.scalars(
-                select(Submission).where(
+                select(Submission)
+                .where(
                     Submission.institution_id == context.institution_id,
                     Submission.student_id == context.user_id,
                     Submission.assignment_id.in_(ids),
                 )
+                .order_by(Submission.submitted_at.asc())
             ):
                 mine[sub.assignment_id] = sub
         else:
@@ -135,7 +137,14 @@ async def list_assignments(
         if learner:
             sub = mine.get(a.id)
             item["submission"] = (
-                {"id": str(sub.id), "status": sub.status, "score": sub.score, "feedback": sub.feedback}
+                {
+                    "id": str(sub.id),
+                    "status": sub.status,
+                    "score": sub.score,
+                    "feedback": sub.feedback,
+                    "submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
+                    "attachment_name": sub.attachment_name,
+                }
                 if sub
                 else None
             )
@@ -173,6 +182,8 @@ async def list_submissions(
             "student_id": str(r.student_id),
             "student_name": users[r.student_id].display_name if r.student_id in users else "Unknown",
             "body": r.body,
+            "attachment_name": r.attachment_name,
+            "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
             "status": r.status,
             "score": r.score,
             "feedback": r.feedback,

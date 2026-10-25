@@ -8,13 +8,14 @@ type Graded = { question_id: string; correct: boolean | null; expected?: string;
 type Attempt = { score: number | null; status: string; answers: Graded[] };
 
 async function deviceReady(kind: "camera" | "microphone") {
-  if (!navigator.mediaDevices?.getUserMedia) return false;
+  if (!navigator.mediaDevices?.getUserMedia) return { ok: false, label: "" };
   try {
     const stream = await navigator.mediaDevices.getUserMedia(kind === "camera" ? { video: true } : { audio: true });
+    const label = stream.getTracks()[0]?.label || kind;
     stream.getTracks().forEach((track) => track.stop());
-    return true;
+    return { ok: true, label };
   } catch {
-    return false;
+    return { ok: false, label: "" };
   }
 }
 
@@ -36,7 +37,9 @@ export function StudentExamCenter({ navigate }: { navigate: (module: string, sub
   const [phase, setPhase] = useState<"list" | "checks" | "exam" | "result">("list");
   const [camera, setCamera] = useState<"idle" | "pass" | "fail">("idle");
   const [microphone, setMicrophone] = useState<"idle" | "pass" | "fail">("idle");
-  const [identity, setIdentity] = useState(false);
+  const [identity, setIdentity] = useState("");
+  const [cameraLabel, setCameraLabel] = useState("");
+  const [microphoneLabel, setMicrophoneLabel] = useState("");
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [result, setResult] = useState<Attempt | null>(null);
@@ -48,7 +51,9 @@ export function StudentExamCenter({ navigate }: { navigate: (module: string, sub
   useEffect(() => {
     setCamera("idle");
     setMicrophone("idle");
-    setIdentity(false);
+    setIdentity("");
+    setCameraLabel("");
+    setMicrophoneLabel("");
     setIndex(0);
     setAnswers({});
     setResult(null);
@@ -59,14 +64,22 @@ export function StudentExamCenter({ navigate }: { navigate: (module: string, sub
     if (!rules || rules[name] !== "required") return false;
     if (name === "camera") return camera !== "pass";
     if (name === "microphone") return microphone !== "pass";
-    return !identity;
+    return identity.trim().length < 2;
   };
   const canStart = exam && !blocked("camera") && !blocked("microphone") && !blocked("identity");
 
   const runDevices = async () => {
     if (!rules) return;
-    if (rules.camera !== "off") setCamera((await deviceReady("camera")) ? "pass" : "fail");
-    if (rules.microphone !== "off") setMicrophone((await deviceReady("microphone")) ? "pass" : "fail");
+    if (rules.camera !== "off") {
+      const cameraCheck = await deviceReady("camera");
+      setCamera(cameraCheck.ok ? "pass" : "fail");
+      setCameraLabel(cameraCheck.label);
+    }
+    if (rules.microphone !== "off") {
+      const microphoneCheck = await deviceReady("microphone");
+      setMicrophone(microphoneCheck.ok ? "pass" : "fail");
+      setMicrophoneLabel(microphoneCheck.label);
+    }
   };
 
   const begin = () =>
@@ -79,7 +92,10 @@ export function StudentExamCenter({ navigate }: { navigate: (module: string, sub
           consent: true,
           camera_ready: camera === "pass",
           microphone_ready: microphone === "pass",
-          identity_confirmed: identity,
+          camera_label: cameraLabel,
+          microphone_label: microphoneLabel,
+          identity_confirmed: identity.trim().length > 1,
+          identity_name: identity.trim(),
         });
       }
       setPhase("exam");
@@ -163,7 +179,8 @@ export function StudentExamCenter({ navigate }: { navigate: (module: string, sub
         <section className="card">
           <div className="scope-row"><span><strong>Camera</strong><small>{label("camera", camera)}</small></span><Badge tone={camera === "pass" ? "success" : camera === "fail" && rules.camera === "required" ? "warning" : "default"}>{rules.camera?.toUpperCase()}</Badge></div>
           <div className="scope-row"><span><strong>Microphone</strong><small>{label("microphone", microphone)}</small></span><Badge tone={microphone === "pass" ? "success" : microphone === "fail" && rules.microphone === "required" ? "warning" : "default"}>{rules.microphone?.toUpperCase()}</Badge></div>
-          <label className="signup-consent"><input type="checkbox" checked={identity} onChange={(event) => setIdentity(event.target.checked)} /><span>I confirm that I am the enrolled learner taking this assessment. {rules.identity === "required" ? "This confirmation is required." : "This confirmation is optional."}</span></label>
+          <label>Identity<input value={identity} onChange={(event) => setIdentity(event.target.value)} placeholder="Type the name on your account" /></label>
+          <p>{rules.identity === "required" ? "The name must match your account before the assessment opens." : "Identity is optional for this assessment."}</p>
           <div className="panel-actions">
             <Btn onClick={runDevices}>Run camera and microphone checks</Btn>
             <Btn variant="primary" disabled={!canStart || action.busy} onClick={begin}>{action.busy ? "Checking..." : "Begin assessment"}</Btn>

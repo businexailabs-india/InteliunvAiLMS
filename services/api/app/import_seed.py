@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
+from app.services.objective_bank import SEEDED_ASSESSMENT_QUESTIONS
 from app.models import (
     AiBudget,
     AiConversation,
@@ -378,15 +379,7 @@ async def import_data(root: Path) -> dict[str, int]:
                 "max_score": int(row.get("max_score") or 100),
                 "proctored": bool(row.get("proctored")),
                 "status": "published",
-                "questions": [
-                    {
-                        "id": "q1",
-                        "type": "mcq",
-                        "prompt": "Which join returns all rows from the left table?",
-                        "answer": "LEFT OUTER JOIN",
-                        "points": 1,
-                    }
-                ],
+                "questions": SEEDED_ASSESSMENT_QUESTIONS,
             },
         )
         await scoped_insert(

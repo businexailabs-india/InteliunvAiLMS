@@ -719,18 +719,43 @@ async def submit_assignment(
         raise HTTPException(status_code=403, detail="Not enrolled in this course")
     if assignment.due_at is not None and assignment.due_at < datetime.now(UTC):
         raise HTTPException(status_code=409, detail="The due date for this assignment has passed")
-    if not payload.body.strip():
-        raise HTTPException(status_code=422, detail="Enter your work before submitting")
-    submission = Submission(
-        institution_id=context.institution_id,
-        assignment_id=assignment_id,
-        student_id=context.user_id,
-        body=payload.body,
+    attachment = payload.attachment_text.strip()
+    if len(payload.attachment_text) > 20000:
+        raise HTTPException(status_code=422, detail="Attachment text must be 20000 characters or fewer")
+    if not payload.body.strip() and not attachment:
+        raise HTTPException(status_code=422, detail="Enter your work or attach a text file before submitting")
+    submission = await session.scalar(
+        select(Submission)
+        .where(
+            Submission.institution_id == context.institution_id,
+            Submission.assignment_id == assignment_id,
+            Submission.student_id == context.user_id,
+        )
+        .order_by(Submission.submitted_at.desc())
     )
-    session.add(submission)
+    if submission is None:
+        submission = Submission(
+            institution_id=context.institution_id,
+            assignment_id=assignment_id,
+            student_id=context.user_id,
+            body=payload.body.strip(),
+        )
+        session.add(submission)
+    submission.body = payload.body.strip()
+    submission.attachment_name = payload.attachment_name.strip()[:240]
+    submission.attachment_text = attachment
+    submission.submitted_at = datetime.now(UTC)
+    submission.status = "submitted"
+    submission.score = None
+    submission.feedback = ""
     await session.commit()
     await session.refresh(submission)
-    return {"id": str(submission.id), "status": submission.status}
+    return {
+        "id": str(submission.id),
+        "status": submission.status,
+        "submitted_at": submission.submitted_at.isoformat(),
+        "attachment_name": submission.attachment_name,
+    }
 
 
 @router.get("/parents/learners")

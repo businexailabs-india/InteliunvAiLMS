@@ -14,3 +14,14 @@ def integrity_rules(assessment) -> dict[str, str]:
 def missing_checks(rules: dict[str, str], *, camera_ready: bool, microphone_ready: bool, identity_confirmed: bool) -> list[str]:
     present = {"camera": camera_ready, "microphone": microphone_ready, "identity": identity_confirmed}
     return [name for name, level in rules.items() if level == "required" and not present.get(name, False)]
+
+
+def identity_matches(stated: str, *, display_name: str, email: str | None) -> bool:
+    """Identity is confirmed only when the typed name matches the signed-in account."""
+    value = stated.strip().casefold()
+    if not value:
+        return False
+    accepted = {display_name.strip().casefold()}
+    if email:
+        accepted.add(email.strip().casefold())
+    return value in accepted

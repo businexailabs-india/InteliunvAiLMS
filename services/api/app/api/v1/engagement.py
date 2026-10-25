@@ -25,9 +25,9 @@ from app.schemas import (
     ProctorReviewRequest,
     ProctorStartRequest,
 )
-from app.security.rbac import BILLING_ROLES, PROCTOR_REVIEW_ROLES, STUDENT_ROLES, require_any
+from app.security.rbac import BILLING_ROLES, PROCTOR_REVIEW_ROLES, STAFF_ROLES, STUDENT_ROLES, TEACHER_ROLES, require_any
 from app.services.audit import write_audit
-from app.services.integrity import integrity_rules, missing_checks
+from app.services.integrity import identity_matches, integrity_rules, missing_checks
 
 router = APIRouter(prefix="/api/v1", tags=["engagement"])
 
@@ -78,8 +78,31 @@ async def _deck(session: AsyncSession, context: TenantContext, game: str, course
             for row in rows
             if row.options and row.answer
         ]
-        if len(bank) >= 3:
+        if bank:
             return bank[:8]
+        assessments = list(
+            await session.scalars(
+                select(Assessment).where(
+                    Assessment.institution_id == context.institution_id,
+                    Assessment.course_id == course_id,
+                )
+            )
+        )
+        from_course = []
+        for assessment in assessments:
+            for item in assessment.questions or []:
+                if isinstance(item, dict) and item.get("options") and item.get("answer"):
+                    from_course.append(
+                        {
+                            "id": str(item.get("id")),
+                            "prompt": item.get("prompt") or "Question",
+                            "options": list(item.get("options") or []),
+                            "answer": item.get("answer"),
+                        }
+                    )
+        if from_course:
+            return from_course[:8]
+        return []
     return QUEST_DECK if game == "quick_quest" else QUIZ_DECK
 
 
@@ -168,7 +191,8 @@ async def submit_practice(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    require_any(context, STUDENT_ROLES)
+    require_any(context, STUDENT_ROLES | TEACHER_ROLES)
+    learner = bool(set(context.role_codes) & STUDENT_ROLES) and not (set(context.role_codes) & STAFF_ROLES)
     if payload.game not in {"quiz", "quick_quest"}:
         raise HTTPException(status_code=422, detail="Game must be quiz or quick_quest")
     questions = await _deck(session, context, payload.game, payload.course_id)
@@ -207,7 +231,7 @@ async def submit_practice(
             PointsLedger.source_event_id == payload.source_event_id,
         )
     )
-    if existing is None:
+    if existing is None and learner:
         session.add(
             PointsLedger(
                 institution_id=context.institution_id,
@@ -238,7 +262,7 @@ async def submit_practice(
         "correct": correct,
         "total": total_questions,
         "score_pct": score,
-        "xp_awarded": 0 if existing else xp,
+        "xp_awarded": 0 if existing or not learner else xp,
         "total_xp": total_xp,
         "rank": rank,
         "badge": "Accuracy badge" if total_questions and correct / total_questions >= 0.8 else None,
@@ -253,31 +277,9 @@ async def play_game(
     session: AsyncSession = Depends(get_session),
 ) -> GamePlayResponse:
     require_any(context, STUDENT_ROLES)
-    xp = compute_xp(payload)
-    existing = await session.scalar(
-        select(PointsLedger).where(
-            PointsLedger.institution_id == context.institution_id,
-            PointsLedger.source_event_id == payload.source_event_id,
-        )
-    )
-    if existing is None:
-        session.add(
-            PointsLedger(
-                institution_id=context.institution_id,
-                user_id=context.user_id,
-                game_type=payload.game_type,
-                xp=xp,
-                source_event_id=payload.source_event_id,
-                details={"correct": payload.correct, "total": payload.total},
-            )
-        )
-        await session.commit()
-    total, rank, board = await standings(session, context)
-    return GamePlayResponse(
-        xp_awarded=0 if existing else xp,
-        total_xp=total,
-        rank=rank,
-        leaderboard=board,
+    raise HTTPException(
+        status_code=422,
+        detail="Submit answers to /api/v1/practice-deck/submit. A client-supplied score is not accepted.",
     )
 
 
@@ -294,11 +296,12 @@ async def start_proctoring(
     if assessment is None or assessment.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Assessment not found")
     rules = integrity_rules(assessment)
+    identity_ok = identity_matches(payload.identity_name, display_name=context.display_name, email=context.email)
     failed = missing_checks(
         rules,
-        camera_ready=payload.camera_ready,
-        microphone_ready=payload.microphone_ready,
-        identity_confirmed=payload.identity_confirmed,
+        camera_ready=payload.camera_ready and bool(payload.camera_label.strip()),
+        microphone_ready=payload.microphone_ready and bool(payload.microphone_label.strip()),
+        identity_confirmed=payload.identity_confirmed and identity_ok,
     )
     if failed:
         await write_audit(
@@ -316,7 +319,7 @@ async def start_proctoring(
         student_id=context.user_id,
         assessment_id=payload.assessment_id,
         consent=True,
-        identity_check="confirmed" if payload.identity_confirmed else "not_required",
+        identity_check="confirmed" if identity_ok else "not_required",
         camera_ready=payload.camera_ready,
         microphone_ready=payload.microphone_ready,
         decision="checks_passed",
