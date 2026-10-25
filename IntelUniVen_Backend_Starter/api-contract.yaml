@@ -1,0 +1,64 @@
+openapi: 3.0.3
+info:
+  title: IntelUniVen AI Edu Lab — Proposed LMS API
+  version: 0.2.0-proposal
+servers:
+  - url: http://localhost:8000
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/courses:
+    get:
+      summary: List tenant-scoped courses
+      responses:
+        '200': {description: Course list}
+    post:
+      summary: Create course (faculty/admin)
+      responses:
+        '201': {description: Course created}
+  /api/v1/enrollments:
+    get:
+      summary: List authorized enrollments
+      responses:
+        '200': {description: Enrollment list}
+  /api/v1/attendance:
+    get:
+      summary: List authorized attendance records
+      responses:
+        '200': {description: Attendance records}
+  /api/v1/assessments:
+    get:
+      summary: List assessments
+      responses:
+        '200': {description: Assessments}
+  /api/v1/results:
+    get:
+      summary: List scoped student results
+      responses:
+        '200': {description: Results}
+  /api/v1/ai/study-buddy:
+    post:
+      summary: Submit a syllabus-grounded tutor query
+      responses:
+        '200': {description: Tutor response and usage metadata}
+  /api/v1/ai/teacher-copilot:
+    post:
+      summary: Draft teaching material for faculty review
+      responses:
+        '200': {description: Generated draft}
+  /api/v1/gamification:
+    get:
+      summary: List available games and earned XP
+      responses:
+        '200': {description: Gamification data}
+  /api/v1/proctoring:
+    get:
+      summary: List authorized exam integrity review sessions
+      responses:
+        '200': {description: Review sessions}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "c95a7936-a597-53bf-abba-162879c15202",
+    "slug": "demo-tenant-1",
+    "name": "Demo Academy 1",
+    "type": "education"
+  },
+  {
+    "id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "slug": "demo-tenant-2",
+    "name": "Demo Academy 2",
+    "type": "education"
+  },
+  {
+    "id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "slug": "demo-tenant-3",
+    "name": "Demo Academy 3",
+    "type": "education"
+  },
+  {
+    "id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "slug": "demo-tenant-4",
+    "name": "Demo Academy 4",
+    "type": "education"
+  },
+  {
+    "id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "slug": "demo-tenant-5",
+    "name": "Demo Academy 5",
+    "type": "education"
+  },
+  {
+    "id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "slug": "demo-tenant-6",
+    "name": "Demo Corporate Learning 6",
+    "type": "corporate"
+  },
+  {
+    "id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "slug": "demo-tenant-7",
+    "name": "Demo Corporate Learning 7",
+    "type": "corporate"
+  },
+  {
+    "id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "slug": "demo-tenant-8",
+    "name": "Demo Corporate Learning 8",
+    "type": "corporate"
+  },
+  {
+    "id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "slug": "demo-tenant-9",
+    "name": "Demo Corporate Learning 9",
+    "type": "corporate"
+  },
+  {
+    "id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "slug": "demo-tenant-10",
+    "name": "Demo Corporate Learning 10",
+    "type": "corporate"
+  }
+]

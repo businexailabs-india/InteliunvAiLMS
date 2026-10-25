@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: businex
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres-dev-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d businex"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432"
+    volumes:
+      - businex-postgres:/var/lib/postgresql/data
+      - ./postgres:/docker-entrypoint-initdb.d:ro
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "6379:6379"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin-dev-only
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+
+  api:
+    build:
+      context: ../../services/api
+    env_file:
+      - ../../services/api/config.example.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../IntelUniVen_Backend_Starter/synthetic-data:/data/synthetic:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  worker:
+    build:
+      context: ../../services/api
+    env_file:
+      - ../../services/api/config.example.env
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/containers/web.Dockerfile
+    environment:
+      PORT: "8443"
+      VITE_API_PROXY: http://api:8000
+      API_PROXY_TARGET: http://api:8000
+    ports:
+      - "8443:8443"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  businex-postgres:

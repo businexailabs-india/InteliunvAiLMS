@@ -1,0 +1,7 @@
+.git
+**/__pycache__
+**/.venv
+**/node_modules
+**/dist
+**/*.pyc
+IntelUniVen_Backend_Starter/synthetic-data

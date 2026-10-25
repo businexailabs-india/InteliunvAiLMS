@@ -1,0 +1,18 @@
+{
+  "title": "IntelUniVen AI Edu Lab | IntelUniVen Software Solutions Pvt. Ltd.",
+  "description": "IntelUniVen AI Edu Lab by IntelUniVen Software Solutions Pvt. Ltd. is an AI-powered education platform for K-12 schools, colleges, universities, and enterprise learning.",
+  "language": "en",
+  "robots": {
+    "index": false
+  },
+  "icons": {
+    "icon": "/assets/inteluniven-logo.jpeg"
+  },
+  "openGraph": {
+    "image": "/assets/inteluniven-logo.jpeg"
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

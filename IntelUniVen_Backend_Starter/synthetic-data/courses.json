@@ -1,0 +1,702 @@
+[
+  {
+    "id": "0acfe99e-3193-5bf5-849c-f019355f2035",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "84fef5aa-6c23-5c0b-8271-96a70a057e9f",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "682c77ea-954d-5bc9-be0a-8bc79ff7d050",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "e524d7c9-cb07-5035-9133-e04fb1730797",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "f6c3ddfd-7ab8-5bf6-9647-c75cfc6a57f9",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "07ed016f-5aa3-5c4a-8d6a-37f3543c935e",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "f7adc92a-e2b8-5738-b84e-4eb1cd7bd531",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "99206f68-99bc-57ec-bfde-777997684f89",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "81aa134b-3f80-5a9c-a704-ee7ad041d65f",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "a0603b4f-a642-5043-a137-d396128b572a",
+    "tenant_id": "c95a7936-a597-53bf-abba-162879c15202",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "46057af4-c5ea-5f5b-bd1d-caac84285982",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "afac2738-d54e-55ba-b903-992151964e41",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "b9eefcdb-1655-5e63-a291-33de3e20a03e",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "57114e81-0873-5f10-aeaa-ccdb389bcf60",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "1d8f69b9-97b4-57a5-a8e8-2cf9ef84e29d",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "42f56c3a-0380-5583-a74b-fa9f31c9d212",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "8c11ff25-441c-5d30-a36a-6979f26eec74",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "c88fe2d3-f166-5e4b-b08b-9d88ae8a91ca",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "23717aee-0ac6-59ca-b6ff-524ebb434814",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "5fbc7719-26ea-5810-a120-0b81f6f93d56",
+    "tenant_id": "ba8fab84-7b6b-5a04-9f14-242ed8c1465b",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "7bf3822c-10f0-5838-9fb1-f730dcbe29ad",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "ae5f0aa0-abc7-5053-9130-02e9c6d175cc",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "124f4a3e-df1a-5511-9157-8c445509bfc2",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "9a898f5a-1b4e-5a48-9978-cb3ccd3c5991",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "5e5a7b69-94e9-567b-b199-da0419c77f1d",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "969afeee-f7aa-57d7-bce0-530d3a8198e2",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "203c7751-29f7-5b12-b4e5-7108c8bc9d4a",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "2be30051-1f1e-50ac-a44b-65c9ac203410",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "21d3182a-0e5e-588e-aaf6-ad7cb33942cf",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "059e6dca-db62-5fe9-bea5-71b946b3b95f",
+    "tenant_id": "d8e82fc5-ac2b-5bd7-8049-c6eee337a71d",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "266cdfcd-f6d7-5650-a7ac-e4fb281546dc",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "5f999003-ff31-54ed-9b98-5bc9c1b6cb7f",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "39babc8d-0d3e-5e7f-a476-7a8b19fc76c2",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "63225cfa-96e6-5697-9027-9982ad55d3ad",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "ffe3b83d-4c82-5394-8888-041bbfb9cdf3",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "b767898f-7a70-5a0d-8b49-7f47a680c71d",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "504412e8-4a26-54f7-8712-ff877b57040d",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "6d0d1ab2-e2ac-5382-bf58-eae0a161f244",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "efebbf95-7a43-5f83-923a-e310156afe6b",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "480b3fbf-b978-5b2c-ae6d-da605228c7b5",
+    "tenant_id": "f3fa1bfa-e066-561a-a0c1-5e24d8738616",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "91073208-d41a-51c3-9e4f-a001f5e107dc",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "68ee0f9e-1b8d-580a-b790-df1adc731dc9",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "fe39f1f0-c8b7-5ef8-b766-d33ad8132c2f",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "0c834e7a-c83a-5bc2-b2d7-349745a934a7",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "4a82e981-3d86-57d8-bb27-9921e8e05f64",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "0d64a4bd-eb74-5646-a304-b87b090c6262",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "ce1208d7-dd91-529c-9f68-ffba4cf27662",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "2b366389-0857-593f-8795-f87b57a7b4b8",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "edec2284-a4b7-5d93-afde-7df3e787a8c9",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "bde40476-cefc-5e47-a95c-e6c4292c609c",
+    "tenant_id": "1e0a90fe-6ad0-5233-86b7-ee0aed9718c3",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "5c3993f0-967b-5f1b-a03d-6974960c6202",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "4e342aea-4be2-54c9-b6bd-f0f12c11465a",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "8b79edfd-3d62-59c6-b0e2-031f629d115c",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "730e7b73-d5fc-5341-84ed-52e7f9724764",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "4e2641d4-b18b-5ed2-a6d0-4e5a66fde8c8",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "0c479358-1f50-518c-9de5-a8c7018cf0f7",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "ac7f4482-c611-5645-9180-baf0bc9cad9d",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "38bc9e15-0117-5383-b886-12018a265716",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "5aa358e3-4334-5152-8036-4f9b34c5e953",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "493b533e-a4fb-5a1d-8ff4-599820c1d210",
+    "tenant_id": "2d4cbe7a-67ca-505d-9867-3e4f92f5d7a6",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "0f4290a1-3c5c-54a1-8563-10f9eb087803",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "48abc669-27cc-55ab-ade5-d34fce1cd3a2",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "bf56e10f-79b8-5d25-ac1f-bc355436dc18",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "dd13feb7-b809-5d8e-a69a-f5cd0f70f3fc",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "2a113b7d-6540-5bbf-ab63-f1bae81aa446",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "266e32b7-69ff-5eae-923c-8eeccb0516f1",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "53575569-d968-5167-875c-7a87886e918e",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "91c94822-8e60-59c4-bb3b-a51e25137f84",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "77cda889-b358-52a6-8892-42f2ef97df6a",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "f63e750f-13bd-5aad-90fa-0cf3ebb75390",
+    "tenant_id": "37eced67-c85d-50b5-a170-650ba6add420",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "380d355d-6777-50b0-9f97-eee9256a5428",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "c3cacd24-d4e7-5fe2-ad92-2543be787a93",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "7a28e52e-cc1d-5bc9-9069-fe25b3b885db",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "8141708f-53ea-5068-babf-aa9df48fe7cd",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "92339ccc-cab1-5602-82cb-f55c05604161",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "683fc093-cce2-5f80-ab3d-7764a79a73f0",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "4e33fe63-e679-5a5f-8f1d-ebc73d3fcad3",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "e18ca38c-6fee-5bdd-a494-b611b2096c59",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "271a2e0a-c6ee-561d-8197-04c8d9c69a5f",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "c8d03a33-a150-5855-84f8-413324399a80",
+    "tenant_id": "3c3f3043-6003-5bf1-97ea-36af741dfd78",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "1a2c200b-2d4b-52d1-81a5-37e0c96fb0ac",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "f563130e-4bd9-5e93-b684-b8ed84b9de9e",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "104f496c-45fb-5e84-83a5-35297f9d00f4",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "8dfe4806-7547-53b0-8a95-6f92734eb86d",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "7e23688d-c423-599b-a1da-77704ae967d4",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "978b98ea-7185-5f9a-94c1-e698f3bc1d91",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "7eadd12c-9791-528a-9d62-b00ab2b947c1",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "4563899d-6490-5fc9-afe4-f6df6bbf7a17",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "3ae20848-6906-5e8b-ac0c-1dae94d92d41",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "8ae95462-c446-58d4-bdca-2eee882b2ac8",
+    "tenant_id": "8a8287cd-3795-5ef5-963e-b7f0e642ae9a",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "a81c75b6-4d5c-5b47-ab27-f9e8a90d1f51",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "Python Fundamentals",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "1035b753-ca17-5c89-8f81-7d7db4f0be0f",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "Data Science",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "49365ea3-a6d5-5644-9da6-ecbdc9170679",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "AWS Cloud",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "20554c8b-736a-5e3f-af8d-67b33e25a3ec",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "Azure Data Engineering",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "3859f3bb-c6e0-54b5-a22a-376e5b12271e",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "Google Cloud AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "ed8cee27-7a8a-545b-b949-48977217b9b4",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "OCI Foundations",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "4435b341-28a7-578d-bf87-dfd678dfcc4b",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "SAP BTP",
+    "level": "beginner",
+    "status": "published"
+  },
+  {
+    "id": "0519d5ff-0592-5b78-91c2-4fe08a7c68d4",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "Generative AI",
+    "level": "intermediate",
+    "status": "published"
+  },
+  {
+    "id": "1235baee-605c-5394-81a1-3e52af88ee83",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "Cybersecurity",
+    "level": "advanced",
+    "status": "published"
+  },
+  {
+    "id": "b5ead144-bb04-5a83-9fb4-ba7003b56464",
+    "tenant_id": "f36c3857-62c1-523f-b1e7-a3d718a35c9b",
+    "title": "Communication Skills",
+    "level": "beginner",
+    "status": "published"
+  }
+]

@@ -1,0 +1,50 @@
+{
+  "realm": "businex",
+  "enabled": true,
+  "displayName": "BusineX AI Edu Lab",
+  "roles": {
+    "realm": [
+      {"name": "platform_super_admin"},
+      {"name": "institution_admin"},
+      {"name": "principal_academic_director"},
+      {"name": "teacher"},
+      {"name": "student"},
+      {"name": "parent_guardian"},
+      {"name": "evaluator"}
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "institution-context",
+      "protocol": "openid-connect",
+      "attributes": {"include.in.token.scope": "true"},
+      "protocolMappers": [
+        {
+          "name": "institution-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "institution_id",
+            "claim.name": "institution_id",
+            "jsonType.label": "String",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "businex-api",
+      "name": "BusineX API",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:8443/*"],
+      "webOrigins": ["http://localhost:8443"],
+      "defaultClientScopes": ["openid", "profile", "email", "roles", "institution-context"]
+    }
+  ]
+}
