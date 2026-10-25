@@ -56,18 +56,18 @@ Keep this table current when a CR is implemented, narrowed, or reverted. Status 
 | CR-01 | User registration | Done | Signup posts to `POST /api/v1/auth/register`. Passwords are stored as salted `pbkdf2_sha256` hashes. Duplicate email returns 409. Password rule: 8+ characters, one digit, one uppercase letter. Northstar, Meridian, and Horizon join the existing demo tenants. |
 | CR-02 | Authentication | Done | `POST /api/v1/auth/demo-login` checks the stored hash when one exists, otherwise the demo password. The API issues a 12-hour demo JWT. The UI maps backend role codes onto Student, Teacher, Coordinator, Parent, Principal, and Administrator dashboards. Wrong password and unknown email return 401. Protected routes reject a missing or invalid token. |
 | CR-03 | Course and lesson mapping | Done | Course cards open `cid:<course id>`. Lessons and progress stay on that course. AWS Cloud no longer falls through to SAP S/4HANA Foundations. `POST /api/v1/progress` records completion for the opened lesson id. |
-| CR-04 | Dynamic learning paths | Partial | A signed-in learner's My Learning Path follows the selected enrolled course and its lessons. The Algebra sample path remains only when no live course is loaded. Prerequisite rules are still sample content. |
+| CR-04 | Dynamic learning paths | Done | `GET /api/v1/learning-paths` returns the selected course's lessons, this user's completion, and a lock until the previous lesson is complete. Progress percent is completed lessons divided by the course lesson count. With no enrolled course, the screen says no path is assigned. |
 | CR-05 | Assignments | Done | Teachers and administrators publish an assignment with instructions, max score, and due date on `POST /api/v1/assignments`. Enrolled students see it, submit text, and see score plus feedback after `POST /api/v1/submissions/{id}/grade`. A blank body returns 422. A due date in the past returns 409. |
 | CR-06 | Assessment integrity checks | Done | Each assessment stores camera, microphone, and identity as `required`, `optional`, or `off`. A proctored assessment with an empty rule set requires all three. `POST /api/v1/proctoring/sessions` returns 403 when a required check fails, and `POST /api/v1/assessments/{id}/attempts` stays blocked until a `checks_passed` session exists. Optional checks do not block. Scores, expected answers, and audit events are stored. |
-| CR-07 | Virtual classroom scheduling | Partial | Students do not see Schedule Class. Their classroom menu offers Study Session. Teacher and administrator Schedule Class is a screen-only confirmation and does not create a class record. |
-| CR-08 | Study and revision sessions | Partial | Students get a personal study form that is separate from instructor-led scheduling. The save action updates the open page only. It is not written to the API or kept after refresh. |
+| CR-07 | Virtual classroom scheduling | Done | Teachers, coordinators, and administrators create a class with `POST /api/v1/classes` (title, course, start, duration, timezone). Students receive 403 on that endpoint and do not see the schedule form. Enrolled students see the class on Live Classes. A host or coordinator can remove a class. Another teacher cannot change a class they do not host. |
+| CR-08 | Study and revision sessions | Done | Students save a personal session with `POST /api/v1/study-sessions`. Title, start time, and IANA timezone are required. The list reloads from the account, so it remains after refresh. Update and delete apply only to the owner. |
 | CR-09 | Attendance | Done | Students confirm only their own attendance with `POST /api/v1/attendance/check-in` for an enrolled course. `GET /api/v1/attendance` returns that student's rows. `POST /api/v1/attendance/record` is limited to teachers and coordinators, so a student cannot write the class register. |
 | CR-10 | Quiz Challenge | Done | Students play a multi-question deck from `GET /api/v1/practice-deck?game=quiz`. Answers are omitted from that response. `POST /api/v1/practice-deck/submit` grades on the server, stores score, feedback, points, and an accuracy badge at 80% or higher against the user and course. Repeating the same `source_event_id` awards no extra points. |
 | CR-11 | Quick Quest | Done | Quick Quest uses the same saved session flow with `game=quick_quest`, a 15-second timer per question, server scoring, feedback, points, and the accuracy badge. Recent results come back from `GET /api/v1/gamification`. |
 
 ### Notes that still apply
 
-- CR-03 continue opens the first lesson of the course. The lesson page progress bar is a fixed display; the saved completion lives on `lesson_progress`.
+- CR-03 course Continue still opens the first lesson. My Learning Path resumes the first lesson whose previous lessons are complete. The lesson page progress bar is a fixed display; the saved completion lives on `lesson_progress`.
 - CR-05 has no file attachment. A second submit creates another submission row. Submissions do not store a separate timestamp column.
 - CR-06 identity is an explicit confirmation recorded by the API. Camera and microphone use the browser device check in the exam screen. The API enforces the submitted check flags.
 - CR-10 and CR-11 use an approved question bank for a course when that course has at least three approved items with options and an answer. Otherwise they use the built-in five-question decks. Teachers on Quiz Challenge still open the live quiz arena.
@@ -80,6 +80,7 @@ Keep this table current when a CR is implemented, narrowed, or reverted. Status 
 | --- | --- |
 | `0004_user_password` | `users.password_hash` for CR-01 and CR-02 |
 | `0005_assignments_integrity` | `assignments.due_at`, `assessments.integrity`, `points_ledger.created_at` for CR-05, CR-06, CR-10, and CR-11 |
+| `0006_classes_and_study` | `scheduled_classes` and `study_sessions` for CR-07 and CR-08 |
 
 ## Main files
 
@@ -87,10 +88,10 @@ Keep this table current when a CR is implemented, narrowed, or reverted. Status 
 | --- | --- |
 | Registration and login | `services/api/app/api/v1/auth.py`, `services/api/app/passwords.py`, `src/api/client.ts`, signup and login screens in `src/App.tsx` |
 | Courses, lessons, progress | `services/api/app/api/v1/lms.py`, course and lesson screens in `src/App.tsx` |
-| Learning path | `LearningPathWorkspace` in `src/App.tsx` |
+| Learning path | `services/api/app/api/v1/lms.py`, `services/api/app/services/learning_path.py`, `LearningPathWorkspace` in `src/App.tsx` |
+| Classroom and study session | `services/api/app/api/v1/academics.py`, `src/live/Schedule.tsx`, `VirtualClassroomWorkspace` in `src/App.tsx` |
 | Assignments | `services/api/app/api/v1/lms.py`, `services/api/app/api/v1/academics.py`, `src/live/LiveAcademics.tsx` |
 | Assessment checks | `services/api/app/services/integrity.py`, `services/api/app/api/v1/engagement.py`, `services/api/app/api/v1/lms.py`, `src/live/ExamSession.tsx` |
-| Classroom and study session | `VirtualClassroomWorkspace` in `src/App.tsx` |
 | Attendance | `services/api/app/api/v1/academics.py`, `services/api/app/api/v1/lms.py`, `src/live/LiveAdmin.tsx` |
 | Quiz and Quick Quest | `services/api/app/api/v1/engagement.py`, `services/api/app/services/grading.py`, `src/live/PracticeGame.tsx` |
 | Rule tests | `services/api/tests/test_cr_rules.py`, `services/api/tests/test_grading.py`, `services/api/tests/test_passwords.py`, `services/api/tests/test_rbac.py` |

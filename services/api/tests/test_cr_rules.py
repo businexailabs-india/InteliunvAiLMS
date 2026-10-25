@@ -16,8 +16,10 @@ from app.config import Settings
 from app.passwords import hash_password, verify_password
 from app.schemas import GamePlayRequest, PracticeSubmit
 from app.security.rbac import COORDINATOR_ROLES, STUDENT_ROLES, TEACHER_ROLES, require_any
+from app.api.v1.academics import require_timezone
 from app.services.grading import grade_objective
 from app.services.integrity import integrity_rules, missing_checks
+from app.services.learning_path import sequence_status
 
 
 class _Assessment:
@@ -28,6 +30,20 @@ class _Assessment:
 
 def context(*roles: str) -> TenantContext:
     return TenantContext(user_id=uuid4(), institution_id=uuid4(), role_codes=tuple(roles))
+
+
+def test_learning_path_locks_until_the_previous_lesson_is_complete() -> None:
+    assert sequence_status([]) == []
+    assert sequence_status([False, False]) == ["ready", "locked"]
+    assert sequence_status([True, False, False]) == ["complete", "ready", "locked"]
+    assert sequence_status([True, True]) == ["complete", "complete"]
+
+
+def test_timezone_must_be_a_real_zone() -> None:
+    assert require_timezone("Asia/Kolkata") == "Asia/Kolkata"
+    with pytest.raises(HTTPException) as error:
+        require_timezone("Not/AZone")
+    assert error.value.status_code == 422
 
 
 def test_password_hashes_are_salted_and_verified() -> None:

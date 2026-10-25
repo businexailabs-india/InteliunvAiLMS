@@ -57,6 +57,7 @@ from app.security.rbac import (
 from app.services.audit import write_audit
 from app.services.integrity import integrity_rules
 from app.services.grading import grade_objective
+from app.services.learning_path import sequence_status
 
 router = APIRouter(prefix="/api/v1", tags=["lms"])
 
@@ -253,6 +254,87 @@ async def list_lessons(
         {"id": str(item.id), "title": item.title, "content": item.content, "position": item.position}
         for item in lessons
     ]
+
+
+@router.get("/learning-paths")
+async def learning_path(
+    course_id: UUID | None = None,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Lessons for one enrolled course, with this learner's completion and locks."""
+    roles = set(context.role_codes)
+    learner = bool(roles & STUDENT_ROLES) and not (roles & STAFF_ROLES)
+    course_query = select(Course).where(Course.institution_id == context.institution_id)
+    if learner:
+        course_query = course_query.join(Enrollment).where(Enrollment.student_id == context.user_id)
+    courses = list(await session.scalars(course_query.order_by(Course.title)))
+    if course_id is None:
+        course = courses[0] if courses else None
+    else:
+        course = next((item for item in courses if item.id == course_id), None)
+        if course is None:
+            exists = await session.get(Course, course_id)
+            if exists is None or exists.institution_id != context.institution_id:
+                raise HTTPException(status_code=404, detail="Course not found")
+            raise HTTPException(status_code=403, detail="Not enrolled in this course")
+    if course is None:
+        return {"course": None, "progress_pct": 0, "lessons": []}
+    modules = list(
+        await session.scalars(
+            select(CourseModule).where(
+                CourseModule.institution_id == context.institution_id,
+                CourseModule.course_id == course.id,
+            )
+        )
+    )
+    module_ids = [item.id for item in modules] or [UUID(int=0)]
+    lessons = list(
+        await session.scalars(
+            select(Lesson).where(
+                Lesson.institution_id == context.institution_id,
+                Lesson.module_id.in_(module_ids),
+            )
+        )
+    )
+    by_module: dict[UUID, list[Lesson]] = {}
+    for lesson in lessons:
+        by_module.setdefault(lesson.module_id, []).append(lesson)
+    ordered: list[Lesson] = []
+    for module in sorted(modules, key=lambda item: (item.position, item.title)):
+        ordered.extend(sorted(by_module.get(module.id, []), key=lambda item: (item.position, item.title)))
+    completed_ids = set(
+        await session.scalars(
+            select(LessonProgress.lesson_id).where(
+                LessonProgress.institution_id == context.institution_id,
+                LessonProgress.student_id == context.user_id,
+                LessonProgress.completed.is_(True),
+                LessonProgress.lesson_id.in_([item.id for item in ordered] or [UUID(int=0)]),
+            )
+        )
+    )
+    flags = [item.id in completed_ids for item in ordered]
+    statuses = sequence_status(flags)
+    payload = []
+    previous_title = None
+    for lesson, status in zip(ordered, statuses, strict=True):
+        payload.append(
+            {
+                "id": str(lesson.id),
+                "title": lesson.title,
+                "position": lesson.position,
+                "completed": status == "complete",
+                "status": status,
+                "prerequisite_title": previous_title if status == "locked" else None,
+            }
+        )
+        previous_title = lesson.title
+    done = sum(flags)
+    return {
+        "course": {"id": str(course.id), "title": course.title},
+        "progress_pct": round(100 * done / len(ordered)) if ordered else 0,
+        "lessons": payload,
+    }
 
 
 @router.post("/progress")

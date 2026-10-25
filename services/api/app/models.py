@@ -570,3 +570,32 @@ class QuestionBankItem(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class ScheduledClass(Base):
+    __tablename__ = "scheduled_classes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    institution_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("institutions.id"), nullable=False, index=True
+    )
+    course_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("courses.id"), nullable=False)
+    host_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=45)
+    timezone: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="scheduled")
+
+
+class StudySession(Base):
+    __tablename__ = "study_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    institution_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("institutions.id"), nullable=False, index=True
+    )
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(80), nullable=False)

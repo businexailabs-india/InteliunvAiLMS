@@ -281,6 +281,20 @@ class CohortCreate(BaseModel):
     course_id: UUID | None = None
 
 
+class ScheduledClassCreate(BaseModel):
+    course_id: UUID
+    title: str = Field(min_length=3, max_length=240)
+    starts_at: datetime
+    duration_minutes: int = Field(default=45, ge=15, le=240)
+    timezone: str = Field(min_length=1, max_length=80)
+
+
+class StudySessionWrite(BaseModel):
+    title: str = Field(min_length=3, max_length=240)
+    starts_at: datetime
+    timezone: str = Field(min_length=1, max_length=80)
+
+
 class DashboardResponse(BaseModel):
     role: str
     metrics: dict

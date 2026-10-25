@@ -1,6 +1,8 @@
 """Assignments, attendance recording and the coordinator roster/gradebook."""
 
+from datetime import UTC, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -17,9 +19,12 @@ from app.models import (
     Course,
     Enrollment,
     InstitutionMembership,
+    ScheduledClass,
+    StudySession,
     Submission,
     User,
 )
+from app.schemas import ScheduledClassCreate, StudySessionWrite
 from app.security.rbac import (
     COORDINATOR_ROLES,
     PARENT_ROLES,
@@ -455,3 +460,237 @@ async def roster(
         "learners": learners,
         "synthetic": True,
     }
+
+
+def require_timezone(name: str) -> str:
+    cleaned = name.strip()
+    try:
+        ZoneInfo(cleaned)
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(status_code=422, detail="Enter a valid IANA timezone") from exc
+    return cleaned
+
+
+def _aware(moment: datetime, timezone_name: str) -> datetime:
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=ZoneInfo(timezone_name))
+    return moment.astimezone(UTC)
+
+
+CLASS_AUTHORS = TEACHER_ROLES | COORDINATOR_ROLES
+
+
+def _class_payload(item: ScheduledClass, course_title: str, host_name: str) -> dict:
+    return {
+        "id": str(item.id),
+        "course_id": str(item.course_id),
+        "course_title": course_title,
+        "host_user_id": str(item.host_user_id),
+        "host_name": host_name,
+        "title": item.title,
+        "starts_at": item.starts_at.isoformat(),
+        "duration_minutes": item.duration_minutes,
+        "timezone": item.timezone,
+        "status": item.status,
+    }
+
+
+@router.get("/classes")
+async def list_classes(
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    query = select(ScheduledClass).where(ScheduledClass.institution_id == context.institution_id)
+    roles = set(context.role_codes)
+    if roles & STUDENT_ROLES and not roles & STAFF_ROLES:
+        enrolled = select(Enrollment.course_id).where(
+            Enrollment.institution_id == context.institution_id,
+            Enrollment.student_id == context.user_id,
+        )
+        query = query.where(ScheduledClass.course_id.in_(enrolled))
+    rows = list(await session.scalars(query.order_by(ScheduledClass.starts_at).limit(200)))
+    courses = {
+        course.id: course.title
+        for course in await session.scalars(select(Course).where(Course.id.in_([row.course_id for row in rows] or [UUID(int=0)])))
+    }
+    hosts = {
+        user.id: user.display_name
+        for user in await session.scalars(select(User).where(User.id.in_([row.host_user_id for row in rows] or [UUID(int=0)])))
+    }
+    return [_class_payload(row, courses.get(row.course_id, "Course"), hosts.get(row.host_user_id, "Host")) for row in rows]
+
+
+@router.post("/classes", status_code=201)
+async def create_class(
+    payload: ScheduledClassCreate,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    require_any(context, CLASS_AUTHORS)
+    if set(context.role_codes) & STUDENT_ROLES and not set(context.role_codes) & STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="Students cannot schedule an instructor-led class")
+    await _course_or_404(session, context, payload.course_id)
+    timezone_name = require_timezone(payload.timezone)
+    item = ScheduledClass(
+        institution_id=context.institution_id,
+        course_id=payload.course_id,
+        host_user_id=context.user_id,
+        title=payload.title.strip(),
+        starts_at=_aware(payload.starts_at, timezone_name),
+        duration_minutes=payload.duration_minutes,
+        timezone=timezone_name,
+        status="scheduled",
+    )
+    session.add(item)
+    await write_audit(
+        session,
+        context,
+        action="class.scheduled",
+        resource_type="scheduled_class",
+        resource_id="pending",
+    )
+    await session.commit()
+    await session.refresh(item)
+    host = await session.get(User, context.user_id)
+    course = await session.get(Course, item.course_id)
+    return _class_payload(item, course.title if course else "Course", host.display_name if host else "Host")
+
+
+async def _class_or_404(session: AsyncSession, context: TenantContext, class_id: UUID) -> ScheduledClass:
+    item = await session.get(ScheduledClass, class_id)
+    if item is None or item.institution_id != context.institution_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+    return item
+
+
+def _can_change_class(context: TenantContext, item: ScheduledClass) -> bool:
+    if item.host_user_id == context.user_id:
+        return True
+    return bool(set(context.role_codes) & COORDINATOR_ROLES)
+
+
+@router.patch("/classes/{class_id}")
+async def update_class(
+    class_id: UUID,
+    payload: ScheduledClassCreate,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    require_any(context, CLASS_AUTHORS)
+    item = await _class_or_404(session, context, class_id)
+    if not _can_change_class(context, item):
+        raise HTTPException(status_code=403, detail="You can only change a class you host")
+    await _course_or_404(session, context, payload.course_id)
+    timezone_name = require_timezone(payload.timezone)
+    item.course_id = payload.course_id
+    item.title = payload.title.strip()
+    item.starts_at = _aware(payload.starts_at, timezone_name)
+    item.duration_minutes = payload.duration_minutes
+    item.timezone = timezone_name
+    await session.commit()
+    await session.refresh(item)
+    host = await session.get(User, item.host_user_id)
+    course = await session.get(Course, item.course_id)
+    return _class_payload(item, course.title if course else "Course", host.display_name if host else "Host")
+
+
+@router.delete("/classes/{class_id}")
+async def delete_class(
+    class_id: UUID,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    require_any(context, CLASS_AUTHORS)
+    item = await _class_or_404(session, context, class_id)
+    if not _can_change_class(context, item):
+        raise HTTPException(status_code=403, detail="You can only change a class you host")
+    await session.delete(item)
+    await session.commit()
+    return {"id": str(class_id), "deleted": True}
+
+
+def _study_payload(item: StudySession) -> dict:
+    return {
+        "id": str(item.id),
+        "title": item.title,
+        "starts_at": item.starts_at.isoformat(),
+        "timezone": item.timezone,
+        "owner_user_id": str(item.owner_user_id),
+    }
+
+
+@router.get("/study-sessions")
+async def list_study_sessions(
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    rows = list(
+        await session.scalars(
+            select(StudySession)
+            .where(
+                StudySession.institution_id == context.institution_id,
+                StudySession.owner_user_id == context.user_id,
+            )
+            .order_by(StudySession.starts_at)
+            .limit(200)
+        )
+    )
+    return [_study_payload(row) for row in rows]
+
+
+@router.post("/study-sessions", status_code=201)
+async def create_study_session(
+    payload: StudySessionWrite,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    timezone_name = require_timezone(payload.timezone)
+    item = StudySession(
+        institution_id=context.institution_id,
+        owner_user_id=context.user_id,
+        title=payload.title.strip(),
+        starts_at=_aware(payload.starts_at, timezone_name),
+        timezone=timezone_name,
+    )
+    session.add(item)
+    await session.commit()
+    await session.refresh(item)
+    return _study_payload(item)
+
+
+async def _own_study_session(session: AsyncSession, context: TenantContext, session_id: UUID) -> StudySession:
+    item = await session.get(StudySession, session_id)
+    if item is None or item.institution_id != context.institution_id:
+        raise HTTPException(status_code=404, detail="Study session not found")
+    if item.owner_user_id != context.user_id:
+        raise HTTPException(status_code=403, detail="You can only change your own study session")
+    return item
+
+
+@router.patch("/study-sessions/{session_id}")
+async def update_study_session(
+    session_id: UUID,
+    payload: StudySessionWrite,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    item = await _own_study_session(session, context, session_id)
+    timezone_name = require_timezone(payload.timezone)
+    item.title = payload.title.strip()
+    item.starts_at = _aware(payload.starts_at, timezone_name)
+    item.timezone = timezone_name
+    await session.commit()
+    await session.refresh(item)
+    return _study_payload(item)
+
+
+@router.delete("/study-sessions/{session_id}")
+async def delete_study_session(
+    session_id: UUID,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    item = await _own_study_session(session, context, session_id)
+    await session.delete(item)
+    await session.commit()
+    return {"id": str(session_id), "deleted": True}
