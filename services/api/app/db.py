@@ -39,6 +39,11 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+async def allow_billing_webhook(session: AsyncSession) -> None:
+    """Lets a verified provider webhook read the checkout row before tenant context is known."""
+    await session.execute(text("select set_config('app.billing_webhook', 'on', true)"))
+
+
 async def set_request_context(
     session: AsyncSession,
     *,

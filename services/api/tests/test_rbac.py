@@ -56,6 +56,28 @@ def test_learners_parents_and_teachers_cannot_manage_billing(role: str) -> None:
         require_any(context(role), BILLING_ROLES)
 
 
+def test_coordinators_can_manage_batches() -> None:
+    from app.api.v1.training import CORPORATE_ROLES
+
+    require_any(context("coordinator"), CORPORATE_ROLES)
+    require_any(context("institution_admin"), CORPORATE_ROLES)
+
+
+def test_faculty_and_coordinators_can_save_teaching_notes() -> None:
+    notes = TEACHER_ROLES | COORDINATOR_ROLES
+    require_any(context("teacher"), notes)
+    require_any(context("coordinator"), notes)
+    with pytest.raises(HTTPException):
+        require_any(context("student"), notes)
+
+
+def test_students_cannot_manage_batches() -> None:
+    from app.api.v1.training import CORPORATE_ROLES
+
+    with pytest.raises(HTTPException):
+        require_any(context("student"), CORPORATE_ROLES)
+
+
 def test_students_and_parents_are_not_staff() -> None:
     assert "student" not in STAFF_ROLES
     assert "parent_guardian" not in STAFF_ROLES

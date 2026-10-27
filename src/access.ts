@@ -85,9 +85,30 @@ export function allowListForBackendRoles(roles: string[]): string[] | null {
   return null;
 }
 
-/** Modules visible for a UI role, further narrowed by the signed-in user's backend roles. */
-export function visibleModules(role: Role, backendRoles: string[] = []): string[] {
+/** Extra menu gates. The API permission list is authoritative when the session includes one. */
+const MODULE_NEEDS: Record<string, string[]> = {
+  "Teaching Copilot": ["ai:teacher_copilot"],
+  "AI Study Buddy": ["ai:study_buddy"],
+  Gamification: ["gamification:read"],
+  Administration: ["institution:manage", "institution:update", "user:assign_role", "billing:read", "billing:manage", "user:read"],
+  "Data Security & Privacy": ["audit:read"],
+  Security: ["audit:read"],
+  "AI Governance": ["audit:read"],
+};
+
+/** Modules visible for a UI role, further narrowed by backend roles and granted permissions. */
+export function visibleModules(role: Role, backendRoles: string[] = [], permissions?: string[]): string[] {
   const hidden = new Set(roleHidden[role]);
   const allow = allowListForBackendRoles(backendRoles);
-  return ALL_MODULES.filter((name) => !hidden.has(name) && (allow === null || allow.includes(name)));
+  const granted = permissions && permissions.length > 0 ? new Set(permissions) : null;
+  return ALL_MODULES.filter((name) => {
+    if (hidden.has(name) || (allow !== null && !allow.includes(name))) return false;
+    const needs = MODULE_NEEDS[name];
+    if (!granted || !needs) return true;
+    return needs.some((permission) => granted.has(permission));
+  });
+}
+
+export function hasPermission(permissions: string[] | undefined, permission: string): boolean {
+  return Boolean(permissions?.includes(permission));
 }

@@ -17,3 +17,5 @@ def test_every_api_route_requires_authentication() -> None:
     client = TestClient(app)
     for path in ("/api/v1/courses", "/api/v1/dashboard", "/api/v1/roster", "/api/v1/billing"):
         assert client.get(path).status_code in (401, 403, 422), path
+    for path in ("/api/v1/ai/study-buddy", "/api/v1/cohorts", "/api/v1/scorecards"):
+        assert client.post(path, json={}).status_code in (401, 403), path

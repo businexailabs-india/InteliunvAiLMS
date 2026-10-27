@@ -15,10 +15,14 @@ from app.models import (
     AiUsageEvent,
     AttendanceRecord,
     Attempt,
+    CourseInstructor,
+    Enrollment,
+    ParentLink,
     SourceChunk,
 )
 from app.schemas import AdaptiveResponse, AiAskRequest, AiAskResponse, CopilotRequest, SuccessInsight
-from app.security.rbac import STAFF_ROLES, STUDENT_ROLES, TEACHER_ROLES, require_any
+from app.security.rbac import PARENT_ROLES, STAFF_ROLES, STUDENT_ROLES, TEACHER_ROLES, require_any, require_any_permission, require_permission
+from app.security.scope import covers_every_course
 
 router = APIRouter(prefix="/api/v1/ai", tags=["ai"])
 
@@ -45,6 +49,9 @@ async def consume_quota(
         await session.flush()
     if budget.tokens_used + tokens > budget.monthly_token_quota:
         raise HTTPException(status_code=429, detail="Institution AI quota exceeded")
+    from app.billing.entitlements import consume_meter
+
+    await consume_meter(session, context.institution_id, "ai_tokens", tokens)
     budget.tokens_used += tokens
     return budget
 
@@ -60,7 +67,7 @@ async def retrieve_chunks(
         stmt = stmt.where((SourceChunk.course_id == course_id) | (SourceChunk.course_id.is_(None)))
     chunks = list(await session.scalars(stmt.limit(50)))
     ranked = sorted(chunks, key=lambda item: tokenize_overlap(query, item.body), reverse=True)
-    return [item for item in ranked if tokenize_overlap(query, item.body) > 0][:3] or ranked[:1]
+    return [item for item in ranked if tokenize_overlap(query, item.body) > 0][:3]
 
 
 @router.post("/study-buddy", response_model=AiAskResponse)
@@ -70,6 +77,10 @@ async def study_buddy(
     session: AsyncSession = Depends(get_session),
 ) -> AiAskResponse:
     require_any(context, STUDENT_ROLES | TEACHER_ROLES | STAFF_ROLES)
+    require_permission(context, "ai:study_buddy")
+    from app.billing.entitlements import assert_feature
+
+    await assert_feature(session, context.institution_id, "study_buddy")
     settings = get_settings()
     provider = get_provider(settings)
     chunks = await retrieve_chunks(session, context, payload.message, payload.course_id)
@@ -149,6 +160,7 @@ async def teacher_copilot(
     session: AsyncSession = Depends(get_session),
 ) -> AiAskResponse:
     require_any(context, TEACHER_ROLES)
+    require_permission(context, "ai:teacher_copilot")
     settings = get_settings()
     provider = get_provider(settings)
     prompt = (
@@ -204,6 +216,7 @@ async def adaptive_learning(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> AdaptiveResponse:
+    require_permission(context, "assessment:read")
     attempts = list(
         await session.scalars(
             select(Attempt).where(
@@ -231,7 +244,35 @@ async def student_success(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> SuccessInsight:
+    require_permission(context, "analytics:read")
     target = student_id or context.user_id
+    if target != context.user_id and not covers_every_course(context.role_codes):
+        roles = set(context.role_codes)
+        if roles & PARENT_ROLES and not (roles & STAFF_ROLES):
+            linked = await session.scalar(
+                select(ParentLink.id).where(
+                    ParentLink.institution_id == context.institution_id,
+                    ParentLink.parent_id == context.user_id,
+                    ParentLink.student_id == target,
+                )
+            )
+            if linked is None:
+                raise HTTPException(status_code=404, detail="Student not found")
+        else:
+            assigned = select(CourseInstructor.course_id).where(
+                CourseInstructor.institution_id == context.institution_id,
+                CourseInstructor.user_id == context.user_id,
+                CourseInstructor.active.is_(True),
+            )
+            taught = await session.scalar(
+                select(Enrollment.id).where(
+                    Enrollment.institution_id == context.institution_id,
+                    Enrollment.student_id == target,
+                    Enrollment.course_id.in_(assigned),
+                )
+            )
+            if taught is None:
+                raise HTTPException(status_code=404, detail="Student not found")
     attendance = list(
         await session.scalars(
             select(AttendanceRecord).where(
@@ -277,6 +318,7 @@ async def usage(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
+    require_any_permission(context, {"billing:read", "ai:manage_usage"})
     budget = await session.scalar(
         select(AiBudget).where(AiBudget.institution_id == context.institution_id)
     )

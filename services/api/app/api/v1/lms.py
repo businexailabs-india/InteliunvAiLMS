@@ -1,8 +1,9 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select, update
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import Date, cast, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import TenantContext, get_tenant_context
@@ -12,20 +13,27 @@ from app.models import (
     Assignment,
     Attempt,
     AttendanceRecord,
+    CohortMember,
     CorporateCohort,
     Course,
+    CourseInstructor,
     CourseModule,
     Enrollment,
     Institution,
+    InstitutionMembership,
     Lesson,
     LessonProgress,
     Notification,
     ParentLink,
     ScoreAdjustment,
+    Role,
+    ScheduledClass,
     Scorecard,
     Submission,
-    ProctoringSession,
+    TeachingNote,
     User,
+    UserRoleAssignment,
+    ProctoringSession,
 )
 from app.schemas import (
     AssessmentCreate,
@@ -39,10 +47,13 @@ from app.schemas import (
     CourseResponse,
     DashboardResponse,
     EnrollmentResponse,
+    TeachingNoteCreate,
+    TeachingNoteResponse,
     InstitutionResponse,
     InstitutionUpdate,
     LessonCompleteRequest,
     ScoreAdjustmentRequest,
+    RoleAssignmentRequest,
     ScorecardCreate,
     SubmissionCreate,
 )
@@ -52,9 +63,28 @@ from app.security.rbac import (
     STAFF_ROLES,
     STUDENT_ROLES,
     TEACHER_ROLES,
+    normalize_role as normalize_stored_role,
     require_any,
+    require_any_permission,
+    require_permission,
+)
+from app.security.permissions import can_assign_role
+from app.security.scope import (
+    assert_course_access,
+    assert_course_visible,
+    covers_every_course,
+    ensure_instructor,
+    load_course,
+    reads_every_course,
 )
 from app.services.audit import write_audit
+from app.services.dashboard_view import (
+    TEACHING_NOTE_KINDS,
+    build_alerts,
+    cohort_overview,
+    format_class,
+    week_activity,
+)
 from app.services.integrity import integrity_rules
 from app.services.grading import grade_objective
 from app.services.learning_path import sequence_status
@@ -104,6 +134,7 @@ async def update_current_institution(
     session: AsyncSession = Depends(get_session),
 ) -> Institution:
     require_any(context, {"institution_admin", "principal_academic_director", "platform_super_admin"})
+    require_permission(context, "institution:update")
     institution = await session.get(Institution, context.institution_id)
     if institution is None:
         raise HTTPException(status_code=404, detail="Institution not found")
@@ -134,6 +165,18 @@ async def dashboard(
         course_query = course_query.join(Enrollment, Enrollment.course_id == Course.id).where(
             Enrollment.student_id == context.user_id
         )
+    elif set(context.role_codes) & PARENT_ROLES and not (set(context.role_codes) & STAFF_ROLES):
+        linked = await linked_student_ids(session, context)
+        course_query = course_query.join(Enrollment, Enrollment.course_id == Course.id).where(
+            Enrollment.student_id.in_(linked or {UUID(int=0)})
+        )
+    elif not reads_every_course(context.role_codes):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        course_query = course_query.where(Course.id.in_(assigned))
     courses = list(await session.scalars(course_query.limit(12)))
     notifications = list(
         await session.scalars(
@@ -145,15 +188,185 @@ async def dashboard(
             .limit(10)
         )
     )
-    attendance_avg = await session.scalar(
-        select(func.avg(AttendanceRecord.sessions_present * 100.0 / AttendanceRecord.sessions_total)).where(
-            AttendanceRecord.institution_id == context.institution_id,
-            AttendanceRecord.sessions_total > 0,
+    roles = set(context.role_codes)
+    staff = bool(roles & STAFF_ROLES)
+    student_only = bool(roles & STUDENT_ROLES) and not staff
+    parent_only = bool(roles & PARENT_ROLES) and not staff
+    teacher_only = bool(roles & {"teacher", "corporate_trainer"}) and not (roles & COORDINATOR_ROLES)
+    scope_ids: set[UUID] | None = None
+    if student_only:
+        scope_ids = {context.user_id}
+    elif parent_only:
+        scope_ids = await linked_student_ids(session, context)
+    scope_list = list(scope_ids) if scope_ids is not None else []
+
+    attendance_query = select(func.avg(AttendanceRecord.sessions_present * 100.0 / AttendanceRecord.sessions_total)).where(
+        AttendanceRecord.institution_id == context.institution_id,
+        AttendanceRecord.sessions_total > 0,
+    )
+    at_risk_query = select(func.count()).select_from(AttendanceRecord).where(
+        AttendanceRecord.institution_id == context.institution_id,
+        AttendanceRecord.sessions_total > 0,
+        AttendanceRecord.sessions_present * 100 < AttendanceRecord.sessions_total * 75,
+    )
+    if scope_ids is not None:
+        attendance_query = attendance_query.where(AttendanceRecord.student_id.in_(scope_list or [UUID(int=0)]))
+        at_risk_query = at_risk_query.where(AttendanceRecord.student_id.in_(scope_list or [UUID(int=0)]))
+    attendance_avg = await session.scalar(attendance_query)
+    at_risk = int(await session.scalar(at_risk_query) or 0)
+    learner_count = await session.scalar(
+        select(func.count(func.distinct(Enrollment.student_id))).where(
+            Enrollment.institution_id == context.institution_id,
+            Enrollment.status == "active",
         )
     )
+    faculty_count = await session.scalar(
+        select(func.count(func.distinct(UserRoleAssignment.user_id)))
+        .join(Role, Role.id == UserRoleAssignment.role_id)
+        .where(
+            UserRoleAssignment.institution_id == context.institution_id,
+            Role.code.in_(("teacher", "corporate_trainer")),
+        )
+    )
+    score_query = select(func.avg(Attempt.score)).where(
+        Attempt.institution_id == context.institution_id,
+        Attempt.published.is_(True),
+        Attempt.score.is_not(None),
+    )
+    if scope_ids is not None:
+        score_query = score_query.where(Attempt.student_id.in_(scope_list or [UUID(int=0)]))
+    average_score = await session.scalar(score_query)
+    now = datetime.now(UTC)
+    completed_day = cast(LessonProgress.completed_at, Date)
+    activity_query = (
+        select(completed_day, func.count())
+        .where(
+            LessonProgress.institution_id == context.institution_id,
+            LessonProgress.completed.is_(True),
+            LessonProgress.completed_at.is_not(None),
+            LessonProgress.completed_at >= now - timedelta(days=6),
+        )
+        .group_by(completed_day)
+    )
+    if scope_ids is not None:
+        activity_query = activity_query.where(LessonProgress.student_id.in_(scope_list or [UUID(int=0)]))
+    activity_counts: dict = {}
+    for day, count in await session.execute(activity_query):
+        key = day.date() if isinstance(day, datetime) else day
+        activity_counts[key] = int(count)
+    schedule_query = (
+        select(ScheduledClass, Course.title)
+        .join(Course, Course.id == ScheduledClass.course_id)
+        .where(
+            ScheduledClass.institution_id == context.institution_id,
+            ScheduledClass.starts_at >= now - timedelta(hours=12),
+        )
+        .order_by(ScheduledClass.starts_at)
+        .limit(8)
+    )
+    if student_only or parent_only:
+        enrolled = select(Enrollment.course_id).where(
+            Enrollment.institution_id == context.institution_id,
+            Enrollment.student_id.in_(scope_list or [UUID(int=0)]),
+        )
+        schedule_query = schedule_query.where(ScheduledClass.course_id.in_(enrolled))
+    elif teacher_only:
+        schedule_query = schedule_query.where(ScheduledClass.host_user_id == context.user_id)
+    schedule = [
+        format_class(item.title, course_title, item.starts_at, item.timezone, now)
+        for item, course_title in await session.execute(schedule_query)
+    ]
+    pending_scorecards = 0
+    ungraded = 0
+    published_scorecards = 0
+    if staff:
+        pending_scorecards = int(
+            await session.scalar(
+                select(func.count()).select_from(Scorecard).where(
+                    Scorecard.institution_id == context.institution_id,
+                    Scorecard.status == "pending_approval",
+                )
+            )
+            or 0
+        )
+        published_scorecards = int(
+            await session.scalar(
+                select(func.count()).select_from(Scorecard).where(
+                    Scorecard.institution_id == context.institution_id,
+                    Scorecard.status == "published",
+                )
+            )
+            or 0
+        )
+        ungraded = int(
+            await session.scalar(
+                select(func.count()).select_from(Submission).where(
+                    Submission.institution_id == context.institution_id,
+                    Submission.score.is_(None),
+                )
+            )
+            or 0
+        )
+    published_attempts = int(
+        await session.scalar(
+            select(func.count()).select_from(Attempt).where(
+                Attempt.institution_id == context.institution_id,
+                Attempt.published.is_(True),
+            )
+        )
+        or 0
+    )
+    attempt_total = int(
+        await session.scalar(
+            select(func.count()).select_from(Attempt).where(Attempt.institution_id == context.institution_id)
+        )
+        or 0
+    )
+    cohorts = list(
+        await session.scalars(
+            select(CorporateCohort).where(CorporateCohort.institution_id == context.institution_id).limit(12)
+        )
+    )
+    member_rows = await session.execute(
+        select(CohortMember.cohort_id, func.count())
+        .where(CohortMember.institution_id == context.institution_id)
+        .group_by(CohortMember.cohort_id)
+    )
+    member_counts = {cohort_id: int(count) for cohort_id, count in member_rows}
+    attendance_rows = await session.execute(
+        select(
+            AttendanceRecord.course_id,
+            func.avg(AttendanceRecord.sessions_present * 100.0 / AttendanceRecord.sessions_total),
+        )
+        .where(AttendanceRecord.institution_id == context.institution_id, AttendanceRecord.sessions_total > 0)
+        .group_by(AttendanceRecord.course_id)
+    )
+    attendance_by_course = {course_id: round(float(value), 1) for course_id, value in attendance_rows}
+    progress_rows = await session.execute(
+        select(Enrollment.course_id, func.avg(Enrollment.progress_pct))
+        .where(Enrollment.institution_id == context.institution_id, Enrollment.status == "active")
+        .group_by(Enrollment.course_id)
+    )
+    progress_by_course = {course_id: round(float(value or 0), 1) for course_id, value in progress_rows}
+    batch_students = sum(member_counts.values())
+    notification_rows = [
+        {"id": str(item.id), "title": item.title, "body": item.body, "read": item.read} for item in notifications
+    ]
     metrics = {
         "courses": len(courses),
+        "learners": int(learner_count or 0),
+        "faculty": int(faculty_count or 0),
         "attendance_pct": round(float(attendance_avg or 0), 1),
+        "at_risk": at_risk,
+        "classes_today": sum(1 for item in schedule if item["today"]),
+        "ungraded": ungraded,
+        "pending_scorecards": pending_scorecards,
+        "published_scorecards": published_scorecards,
+        "batches": len(cohorts),
+        "batch_students": batch_students,
+        "published_attempts": published_attempts,
+        "attempt_total": attempt_total,
+        "average_score": None if average_score is None else round(float(average_score), 1),
         "roles": list(context.role_codes),
         "synthetic": True,
     }
@@ -161,11 +374,114 @@ async def dashboard(
         role=role,
         metrics=metrics,
         courses=courses,
-        notifications=[
-            {"id": str(item.id), "title": item.title, "body": item.body, "read": item.read}
-            for item in notifications
-        ],
-        generated_at=datetime.now(UTC),
+        notifications=notification_rows,
+        schedule=schedule,
+        alerts=build_alerts(
+            notifications=notification_rows,
+            at_risk=at_risk,
+            pending_scorecards=pending_scorecards,
+            ungraded=ungraded,
+            staff=staff,
+        ),
+        activity=week_activity(activity_counts, now.date()),
+        overview=cohort_overview(
+            [
+                {
+                    "name": cohort.name,
+                    "course_id": str(cohort.course_id) if cohort.course_id else None,
+                    "members": member_counts.get(cohort.id, 0),
+                    "attendance_pct": attendance_by_course.get(cohort.course_id),
+                    "progress_pct": progress_by_course.get(cohort.course_id),
+                }
+                for cohort in cohorts
+            ]
+        ),
+        generated_at=now,
+    )
+
+
+@router.get("/teaching-notes", response_model=list[TeachingNoteResponse])
+async def list_teaching_notes(
+    kind: str = Query(min_length=2),
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> list[TeachingNoteResponse]:
+    require_any(context, TEACHER_ROLES | COORDINATOR_ROLES)
+    require_permission(context, "ai:teacher_copilot")
+    if kind not in TEACHING_NOTE_KINDS:
+        raise HTTPException(status_code=422, detail="Unknown teaching note kind")
+    note_query = (
+        select(TeachingNote, User.display_name)
+        .join(User, User.id == TeachingNote.author_id)
+        .where(TeachingNote.institution_id == context.institution_id, TeachingNote.kind == kind)
+    )
+    if not covers_every_course(context.role_codes):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        note_query = note_query.where(
+            or_(TeachingNote.author_id == context.user_id, TeachingNote.course_id.in_(assigned))
+        )
+    rows = await session.execute(note_query.order_by(TeachingNote.created_at.desc()).limit(50))
+    return [
+        TeachingNoteResponse(
+            id=note.id,
+            kind=note.kind,
+            title=note.title,
+            body=note.body,
+            status=note.status,
+            course_id=note.course_id,
+            author_name=author_name,
+            created_at=note.created_at,
+        )
+        for note, author_name in rows
+    ]
+
+
+@router.post("/teaching-notes", response_model=TeachingNoteResponse, status_code=201)
+async def create_teaching_note(
+    payload: TeachingNoteCreate,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> TeachingNoteResponse:
+    require_any(context, TEACHER_ROLES | COORDINATOR_ROLES)
+    require_permission(context, "ai:teacher_copilot")
+    if payload.kind not in TEACHING_NOTE_KINDS:
+        raise HTTPException(status_code=422, detail="Unknown teaching note kind")
+    if payload.course_id is not None:
+        await assert_course_access(session, context, payload.course_id, "ai:teacher_copilot")
+    note = TeachingNote(
+        institution_id=context.institution_id,
+        course_id=payload.course_id,
+        author_id=context.user_id,
+        kind=payload.kind,
+        title=payload.title.strip(),
+        body=payload.body.strip(),
+    )
+    session.add(note)
+    await session.flush()
+    await write_audit(
+        session,
+        context,
+        action="teaching_note.created",
+        resource_type="teaching_note",
+        resource_id=str(note.id),
+        details={"kind": note.kind},
+    )
+    await session.commit()
+    await session.refresh(note)
+    author = await session.get(User, note.author_id)
+    return TeachingNoteResponse(
+        id=note.id,
+        kind=note.kind,
+        title=note.title,
+        body=note.body,
+        status=note.status,
+        course_id=note.course_id,
+        author_name=author.display_name if author else "",
+        created_at=note.created_at,
     )
 
 
@@ -174,12 +490,22 @@ async def list_courses(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[Course]:
+    require_permission(context, "course:read")
     query = select(Course).where(Course.institution_id == context.institution_id)
     if set(context.role_codes) & STUDENT_ROLES and not (set(context.role_codes) & STAFF_ROLES):
         query = query.join(Enrollment).where(Enrollment.student_id == context.user_id)
     if set(context.role_codes) & PARENT_ROLES and not (set(context.role_codes) & STAFF_ROLES):
         linked = await linked_student_ids(session, context)
         query = query.join(Enrollment).where(Enrollment.student_id.in_(linked or {UUID(int=0)}))
+    elif not reads_every_course(context.role_codes) and not (
+        set(context.role_codes) & STUDENT_ROLES and not (set(context.role_codes) & STAFF_ROLES)
+    ):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        query = query.where(Course.id.in_(assigned))
     return list(await session.scalars(query.order_by(Course.title)))
 
 
@@ -190,6 +516,7 @@ async def create_course(
     session: AsyncSession = Depends(get_session),
 ) -> Course:
     require_any(context, TEACHER_ROLES | COORDINATOR_ROLES)
+    require_permission(context, "course:create")
     course = Course(
         institution_id=context.institution_id,
         title=payload.title,
@@ -216,6 +543,7 @@ async def create_course(
             position=1,
         )
     )
+    await ensure_instructor(session, context, course.id, context.user_id)
     await write_audit(
         session,
         context,
@@ -228,12 +556,86 @@ async def create_course(
     return course
 
 
+class InstructorAssignRequest(BaseModel):
+    user_id: UUID
+
+
+def _can_assign_instructor(context: TenantContext) -> None:
+    require_any_permission(context, {"course:update", "cohort:manage"})
+    if not covers_every_course(context.role_codes):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
+@router.post("/courses/{course_id}/instructors", status_code=201)
+async def assign_instructor(
+    course_id: UUID,
+    payload: InstructorAssignRequest,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _can_assign_instructor(context)
+    await load_course(session, context, course_id)
+    membership = await session.scalar(
+        select(InstitutionMembership).where(
+            InstitutionMembership.institution_id == context.institution_id,
+            InstitutionMembership.user_id == payload.user_id,
+            InstitutionMembership.status == "active",
+        )
+    )
+    if membership is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    await ensure_instructor(session, context, course_id, payload.user_id)
+    await write_audit(
+        session,
+        context,
+        action="course.instructor_assigned",
+        resource_type="course",
+        resource_id=str(course_id),
+        details={"user_id": str(payload.user_id)},
+    )
+    await session.commit()
+    return {"course_id": str(course_id), "user_id": str(payload.user_id), "active": True}
+
+
+@router.post("/courses/{course_id}/instructors/{user_id}/revoke")
+async def revoke_instructor(
+    course_id: UUID,
+    user_id: UUID,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    _can_assign_instructor(context)
+    await load_course(session, context, course_id)
+    row = await session.scalar(
+        select(CourseInstructor).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.course_id == course_id,
+            CourseInstructor.user_id == user_id,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Teaching assignment not found")
+    row.active = False
+    await write_audit(
+        session,
+        context,
+        action="course.instructor_revoked",
+        resource_type="course",
+        resource_id=str(course_id),
+        details={"user_id": str(user_id)},
+    )
+    await session.commit()
+    return {"course_id": str(course_id), "user_id": str(user_id), "active": False}
+
+
 @router.get("/courses/{course_id}/lessons")
 async def list_lessons(
     course_id: UUID,
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
+    require_permission(context, "lesson:read")
+    await assert_course_visible(session, context, course_id)
     modules = list(
         await session.scalars(
             select(CourseModule).where(
@@ -263,11 +665,23 @@ async def learning_path(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Lessons for one enrolled course, with this learner's completion and locks."""
+    require_permission(context, "lesson:read")
     roles = set(context.role_codes)
     learner = bool(roles & STUDENT_ROLES) and not (roles & STAFF_ROLES)
+    parent = bool(roles & PARENT_ROLES) and not (roles & STAFF_ROLES)
     course_query = select(Course).where(Course.institution_id == context.institution_id)
     if learner:
         course_query = course_query.join(Enrollment).where(Enrollment.student_id == context.user_id)
+    elif parent:
+        linked = await linked_student_ids(session, context)
+        course_query = course_query.join(Enrollment).where(Enrollment.student_id.in_(linked or {UUID(int=0)}))
+    elif not reads_every_course(context.role_codes):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        course_query = course_query.where(Course.id.in_(assigned))
     courses = list(await session.scalars(course_query.order_by(Course.title)))
     if course_id is None:
         course = courses[0] if courses else None
@@ -383,6 +797,7 @@ async def list_enrollments(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[Enrollment]:
+    require_permission(context, "course:read")
     query = select(Enrollment).where(Enrollment.institution_id == context.institution_id)
     if set(context.role_codes) & STUDENT_ROLES and not (set(context.role_codes) & STAFF_ROLES):
         query = query.where(Enrollment.student_id == context.user_id)
@@ -398,6 +813,7 @@ async def list_attendance(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[AttendanceRecord]:
+    require_permission(context, "attendance:read")
     query = select(AttendanceRecord).where(AttendanceRecord.institution_id == context.institution_id)
     roles = set(context.role_codes)
     learner = bool(roles & STUDENT_ROLES) and not (roles & STAFF_ROLES)
@@ -410,6 +826,13 @@ async def list_attendance(
     elif parent:
         linked = await linked_student_ids(session, context)
         query = query.where(AttendanceRecord.student_id.in_(linked or {UUID(int=0)}))
+    elif not reads_every_course(context.role_codes):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        query = query.where(AttendanceRecord.course_id.in_(assigned))
     return list(await session.scalars(query.limit(200)))
 
 
@@ -435,9 +858,27 @@ async def list_assessments(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[AssessmentResponse]:
+    require_permission(context, "assessment:read")
     query = select(Assessment).where(Assessment.institution_id == context.institution_id)
     if course_id:
         query = query.where(Assessment.course_id == course_id)
+    learner = set(context.role_codes) & STUDENT_ROLES and not (set(context.role_codes) & STAFF_ROLES)
+    parent = set(context.role_codes) & PARENT_ROLES and not (set(context.role_codes) & STAFF_ROLES)
+    if learner or parent:
+        enrolled = select(Enrollment.course_id).where(Enrollment.institution_id == context.institution_id)
+        if learner:
+            enrolled = enrolled.where(Enrollment.student_id == context.user_id)
+        else:
+            linked = await linked_student_ids(session, context)
+            enrolled = enrolled.where(Enrollment.student_id.in_(linked or {UUID(int=0)}))
+        query = query.where(Assessment.course_id.in_(enrolled))
+    elif not reads_every_course(context.role_codes):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        query = query.where(Assessment.course_id.in_(assigned))
     rows = list(await session.scalars(query.limit(500)))
     return [
         AssessmentResponse(
@@ -462,6 +903,7 @@ async def create_assessment(
     session: AsyncSession = Depends(get_session),
 ) -> Assessment:
     require_any(context, TEACHER_ROLES | COORDINATOR_ROLES)
+    require_permission(context, "assessment:create")
     course = await session.get(Course, payload.course_id)
     if course is None or course.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -501,6 +943,7 @@ async def submit_attempt(
     session: AsyncSession = Depends(get_session),
 ) -> Attempt:
     require_any(context, STUDENT_ROLES | TEACHER_ROLES)
+    require_permission(context, "assessment:attempt")
     assessment = await session.get(Assessment, assessment_id)
     if assessment is None or assessment.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Assessment not found")
@@ -569,6 +1012,7 @@ async def list_results(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[Attempt]:
+    require_permission(context, "result:read")
     query = select(Attempt).where(Attempt.institution_id == context.institution_id)
     if assessment_id:
         query = query.where(Attempt.assessment_id == assessment_id)
@@ -580,6 +1024,19 @@ async def list_results(
     if set(context.role_codes) & PARENT_ROLES and not (set(context.role_codes) & STAFF_ROLES):
         linked = await linked_student_ids(session, context)
         query = query.where(Attempt.student_id.in_(linked or {UUID(int=0)}), Attempt.published.is_(True))
+    elif not reads_every_course(context.role_codes) and not (
+        set(context.role_codes) & STUDENT_ROLES and not (set(context.role_codes) & STAFF_ROLES)
+    ):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        owned = select(Assessment.id).where(
+            Assessment.institution_id == context.institution_id,
+            Assessment.course_id.in_(assigned),
+        )
+        query = query.where(Attempt.assessment_id.in_(owned))
     return list(await session.scalars(query.limit(limit)))
 
 
@@ -591,6 +1048,7 @@ async def adjust_score(
     session: AsyncSession = Depends(get_session),
 ) -> Attempt:
     require_any(context, COORDINATOR_ROLES)
+    require_permission(context, "result:update")
     attempt = await session.get(Attempt, attempt_id)
     if attempt is None or attempt.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Attempt not found")
@@ -626,6 +1084,7 @@ async def create_scorecard(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     require_any(context, COORDINATOR_ROLES)
+    require_permission(context, "result:approve")
     card = Scorecard(
         institution_id=context.institution_id,
         course_id=payload.course_id,
@@ -646,6 +1105,7 @@ async def approve_scorecard(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     require_any(context, COORDINATOR_ROLES)
+    require_permission(context, "result:publish")
     card = await session.get(Scorecard, scorecard_id)
     if card is None or card.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Scorecard not found")
@@ -682,6 +1142,7 @@ async def create_assignment(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     require_any(context, TEACHER_ROLES | COORDINATOR_ROLES)
+    require_permission(context, "assignment:create")
     item = Assignment(
         institution_id=context.institution_id,
         course_id=payload.course_id,
@@ -705,6 +1166,7 @@ async def submit_assignment(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     require_any(context, STUDENT_ROLES)
+    require_permission(context, "assignment:submit")
     assignment = await session.get(Assignment, assignment_id)
     if assignment is None or assignment.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -793,7 +1255,8 @@ async def create_cohort(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    require_any(context, {"corporate_hr", "institution_admin", "corporate_trainer", "platform_super_admin"})
+    require_any(context, COORDINATOR_ROLES | {"corporate_hr", "corporate_trainer"})
+    require_permission(context, "cohort:manage")
     cohort = CorporateCohort(
         institution_id=context.institution_id,
         name=payload.name,
@@ -806,11 +1269,64 @@ async def create_cohort(
     return {"id": str(cohort.id), "name": cohort.name}
 
 
+@router.post("/role-assignments", status_code=201)
+async def assign_role(
+    payload: RoleAssignmentRequest,
+    context: TenantContext = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    require_permission(context, "user:assign_role")
+    role_code = normalize_stored_role(payload.role_code)
+    if not can_assign_role(context.role_codes, role_code, self_assign=payload.user_id == context.user_id):
+        raise HTTPException(status_code=403, detail="Role assignment is not allowed")
+    membership = await session.scalar(
+        select(InstitutionMembership).where(
+            InstitutionMembership.institution_id == context.institution_id,
+            InstitutionMembership.user_id == payload.user_id,
+            InstitutionMembership.status == "active",
+        )
+    )
+    if membership is None:
+        raise HTTPException(status_code=404, detail="User is not a member of this institution")
+    role = await session.scalar(
+        select(Role).where(Role.institution_id == context.institution_id, Role.code == role_code)
+    )
+    if role is None:
+        raise HTTPException(status_code=404, detail="Role is not defined for this institution")
+    existing = await session.scalar(
+        select(UserRoleAssignment).where(
+            UserRoleAssignment.institution_id == context.institution_id,
+            UserRoleAssignment.user_id == payload.user_id,
+            UserRoleAssignment.role_id == role.id,
+        )
+    )
+    if existing is None:
+        existing = UserRoleAssignment(
+            institution_id=context.institution_id,
+            user_id=payload.user_id,
+            role_id=role.id,
+        )
+        session.add(existing)
+        await session.flush()
+        await write_audit(
+            session,
+            context,
+            action="role.assigned",
+            resource_type="user_role_assignment",
+            resource_id=str(existing.id),
+            details={"user_id": str(payload.user_id), "role": role_code},
+        )
+        await session.commit()
+        await session.refresh(existing)
+    return {"id": str(existing.id), "user_id": str(payload.user_id), "role": role_code}
+
+
 @router.get("/cohorts")
 async def list_cohorts(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
+    require_permission(context, "cohort:read")
     rows = list(
         await session.scalars(
             select(CorporateCohort).where(CorporateCohort.institution_id == context.institution_id)

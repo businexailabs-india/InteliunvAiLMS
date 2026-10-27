@@ -40,8 +40,10 @@ ROLE_CATALOG = [
     ("corporate_trainer", "Corporate Trainer"),
     ("corporate_hr", "Corporate HR / L&D Manager"),
     ("finance_admin", "Finance Admin"),
-    ("content_reviewer", "Content Creator / Reviewer"),
-    ("support_officer", "Support / Compliance Officer"),
+    ("content_creator", "Content Creator"),
+    ("content_reviewer", "Content Reviewer"),
+    ("support_officer", "Support Agent"),
+    ("compliance_officer", "Compliance Officer"),
 ]
 
 PERSONAS = [

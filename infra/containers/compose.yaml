@@ -52,6 +52,8 @@ services:
       - "8000:8000"
     volumes:
       - ../../IntelUniVen_Backend_Starter/synthetic-data:/data/synthetic:ro
+    extra_hosts:
+      - "metadata.google.internal:169.254.169.254"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 10s

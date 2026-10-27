@@ -21,6 +21,35 @@ class ProviderError(RuntimeError):
     """The upstream AI provider could not produce an answer."""
 
 
+def grounded_mock_reply(prompt: str) -> str:
+    """Offline answer that stays labelled and does not echo the system prompt.
+
+    Study Buddy prompts carry retrieved course text under ``Authorized materials``.
+    When that block is missing, the reply says so instead of inventing a source.
+    """
+    question = " ".join(prompt.split())
+    materials = ""
+    if "Learner question:" in prompt:
+        head, _, tail = prompt.partition("Learner question:")
+        question = " ".join(tail.split())
+        marker = "Authorized materials:"
+        materials = " ".join(head.split(marker, 1)[1].split()) if marker in head else ""
+    if "Learner question:" in prompt and (not materials or materials.startswith("No retrieved materials")):
+        return (
+            "This is a mock AI response for offline development. "
+            "No approved course material matched this question, so this is not a sourced answer."
+        )
+    if materials:
+        return (
+            "This is a mock AI response for offline development. "
+            f"It uses only the retrieved course text: {materials[:280]}"
+        )
+    return (
+        "This is a mock AI response for offline development. "
+        f"Draft for human review, not a published result: {question[:180]}"
+    )
+
+
 @dataclass
 class GenerationResult:
     text: str
@@ -45,12 +74,7 @@ class MockProvider(Provider):
     mock = True
 
     async def generate(self, prompt: str) -> GenerationResult:
-        excerpt = prompt.strip().replace("\n", " ")[:180]
-        text = (
-            "This is a mock AI response for offline development. "
-            f"It restates your request without calling a paid provider: {excerpt}. "
-            "Cite only authorized course materials and keep a human in the loop for grades."
-        )
+        text = grounded_mock_reply(prompt)
         tokens_in = max(1, len(prompt) // 4)
         tokens_out = max(1, len(text) // 4)
         return GenerationResult(
@@ -171,10 +195,20 @@ class AzureOpenAIProvider(HttpProvider):
         return self._result(*_chat_text(payload))
 
 
+def _gemini_text(payload: dict) -> tuple[str, int, int]:
+    try:
+        parts = payload["candidates"][0]["content"]["parts"]
+        text = "".join(part.get("text", "") for part in parts)
+    except (KeyError, IndexError, TypeError) as error:
+        raise ProviderError("provider response had an unexpected shape") from error
+    usage = payload.get("usageMetadata") or {}
+    return text.strip(), int(usage.get("promptTokenCount", 0)), int(usage.get("candidatesTokenCount", 0))
+
+
 class GeminiProvider(HttpProvider):
     name = "gemini"
 
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash", **kwargs) -> None:
+    def __init__(self, api_key: str, model: str = "gemini-3.8-flash", **kwargs) -> None:
         super().__init__(**kwargs)
         self.api_key = api_key
         self.model = model
@@ -186,17 +220,54 @@ class GeminiProvider(HttpProvider):
             {"x-goog-api-key": self.api_key},
             {"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
         )
+        return self._result(*_gemini_text(payload))
+
+
+class VertexGeminiProvider(HttpProvider):
+    """Gemini on Vertex AI, authenticated with the GCE service account. No API key is stored."""
+
+    name = "gemini"
+
+    def __init__(
+        self,
+        project: str,
+        location: str,
+        model: str = "gemini-3.8-flash",
+        metadata_url: str = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.project = project
+        self.location = location
+        self.model = model
+        self.metadata_url = metadata_url
+
+    async def _access_token(self) -> str:
         try:
-            parts = payload["candidates"][0]["content"]["parts"]
-            text = "".join(part.get("text", "") for part in parts)
-        except (KeyError, IndexError, TypeError) as error:
-            raise ProviderError("provider response had an unexpected shape") from error
-        usage = payload.get("usageMetadata") or {}
-        return self._result(
-            text.strip(),
-            int(usage.get("promptTokenCount", 0)),
-            int(usage.get("candidatesTokenCount", 0)),
+            async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
+                response = await client.get(self.metadata_url, headers={"Metadata-Flavor": "Google"})
+        except httpx.HTTPError as error:
+            raise ProviderError(f"vertex token request failed ({type(error).__name__})") from error
+        if response.status_code != 200:
+            raise ProviderError(f"vertex token request failed (HTTP {response.status_code})")
+        token = (response.json() or {}).get("access_token") or ""
+        if not token:
+            raise ProviderError("vertex token response had an unexpected shape")
+        return token
+
+    async def generate(self, prompt: str) -> GenerationResult:
+        token = await self._access_token()
+        host = "aiplatform.googleapis.com" if self.location == "global" else f"{self.location}-aiplatform.googleapis.com"
+        url = (
+            f"https://{host}/v1/projects/{self.project}"
+            f"/locations/{self.location}/publishers/google/models/{self.model}:generateContent"
         )
+        payload = await self._post(
+            url,
+            {"Authorization": f"Bearer {token}"},
+            {"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
+        )
+        return self._result(*_gemini_text(payload))
 
 
 def get_provider(settings: Settings) -> Provider:
@@ -213,6 +284,10 @@ def get_provider(settings: Settings) -> Provider:
             settings.azure_openai_deployment,
             settings.azure_openai_api_version,
             **options,
+        )
+    if name == "gemini" and settings.gemini_backend == "vertex" and settings.gemini_project:
+        return VertexGeminiProvider(
+            settings.gemini_project, settings.gemini_location, settings.gemini_model, **options
         )
     if name == "gemini" and settings.gemini_api_key:
         return GeminiProvider(settings.gemini_api_key, settings.gemini_model, **options)

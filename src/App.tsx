@@ -2,10 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiFetch, clearToken, demoLogin, getStoredToken, loadStoredSession, mapBackendRole, registerAccount, type CourseRecord, type DashboardRecord, type Session } from "./api/client";
 import { LiveAssignments, LiveAttendance, LiveRoster, LiveScores } from "./live/LiveAcademics";
 import { LiveBilling, LiveCompletionReport, LivePersonalRecord, LiveProctoring, LiveQuestionBank } from "./live/LiveAdmin";
+import TeachingDesk from "./live/TeachingDesk";
+import RoleAccess from "./live/RoleAccess";
+import { CheckoutStatus, PlanCatalogue } from "./live/BillingCenter";
 import { StudentExamCenter } from "./live/ExamSession";
 import { PracticeGame } from "./live/PracticeGame";
 import { ClassScheduler, ScheduledClassList, StudySessionBoard } from "./live/Schedule";
-import { visibleModules, type Role } from "./access";
+import { hasPermission, visibleModules, type Role } from "./access";
 
 type IconName =
   | "home" | "book" | "path" | "assignment" | "assessment" | "video" | "library"
@@ -103,7 +106,7 @@ const submodules: Record<string, string[]> = {
   Reports: ["Academic Reports", "Attendance Reports", "Assessment Reports", "Learning Reports", "Compliance Reports", "Operational Reports", "Custom Reports"],
   "Data & AI Platform": ["Data Sources", "Pipelines", "Learning Record Store", "Lakehouse", "Analytics Warehouse", "Feature Store", "Vector Knowledge Base", "AI Models"],
   Integrations: ["Integration Marketplace", "Connected Apps", "API Management", "LTI Tools", "Webhooks", "Data Imports", "Developer Portal"],
-  Administration: ["Institution", "Campuses", "Academic Structure", "Users", "Roles", "Permissions", "Tenant Configuration", "Branding", "Feature Management", "Billing"],
+  Administration: ["Batches", "Institution", "Campuses", "Academic Structure", "Users", "Roles", "Permissions", "Tenant Configuration", "Branding", "Feature Management", "Billing", "Plans"],
   "Data Security & Privacy": ["Security Command Center", "Tenant Isolation", "Content Protection", "Assessment Security", "Privacy & Consent", "Audit & Compliance"],
   Security: ["Users & Access", "Roles", "SSO", "MFA", "Security Policies", "Audit Logs", "Privacy", "Consent", "Compliance"],
   "AI Governance": ["AI Models", "Prompt Library", "AI Policies", "Usage Monitoring", "Human Review", "Bias & Quality", "Audit Trail"],
@@ -119,6 +122,12 @@ const roleProfiles: Record<Role, { name: string; initials: string; label: string
   "Principal / L&D Lead": { name: "David Wilson", initials: "DW", label: "Institution oversight", email: "david.wilson@inteluniven.edu", icon: "chart" },
   Administrator: { name: "Olivia Harris", initials: "OH", label: "Institution Admin", email: "olivia.harris@inteluniven.edu", icon: "admin" },
 };
+
+function nameInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const letters = `${(parts[0] || "").slice(0, 1)}${(parts[1] || "").slice(0, 1)}`.toUpperCase();
+  return letters || "ME";
+}
 
 const moduleDetails: Record<string, { title: string; description: string; metrics: [string, string, string?][]; rows: string[][] }> = {
   "Digital Library": { title: "AI Library Search", description: "Search across trusted learning resources using natural language.", metrics: [["24,820", "Learning resources"], ["1,240", "New this month"], ["96%", "Curriculum mapped"]], rows: [["The Geometry of Everyday Life", "Interactive book", "Mathematics · Grade 10"], ["Introduction to Machine Learning", "Video series", "Computer Science · 48 min"], ["Climate Systems and Change", "Research paper", "Environmental Science"]] },
@@ -176,7 +185,36 @@ function Kpi({ label, value, delta, icon, color = "blue" }: { label: string; val
   return <div className="kpi card"><div className={`kpi-icon tone-${color}`}><Icon name={icon} /></div><div className="kpi-content"><span className="eyebrow">{label}</span><strong>{value}</strong><span className={delta.startsWith("+") ? "positive" : "muted"}>{delta}</span></div><Sparkline values={[30, 42, 35, 55, 49, 70, 82]} color={color === "violet" ? "violet" : color === "cyan" ? "cyan" : "blue"} /></div>;
 }
 
-function Dashboard({ role, navigate }: { role: Role; navigate: (module: string, sub?: string, detail?: string) => void }) {
+function alertIcon(module: string): IconName {
+  if (module === "Attendance") return "warning";
+  if (module === "Assignments") return "assignment";
+  if (module === "Assessments") return "assessment";
+  if (module === "Communication") return "chat";
+  return "check";
+}
+
+function shown(value: unknown, suffix = "") {
+  if (value === undefined || value === null || value === "") return "—";
+  return `${value}${suffix}`;
+}
+
+function ActivityChart({ activity }: { activity: { label: string; completions: number }[] }) {
+  const values = activity.map((row) => row.completions);
+  const max = Math.max(1, ...values, 0);
+  const coords = values.map((value, index) => {
+    const x = values.length <= 1 ? 0 : (index * 700) / (values.length - 1);
+    const y = 210 - (value / max) * 180;
+    return { x, y };
+  });
+  const line = coords.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  return <div className="chart">
+    <div className="chart-y"><span>{max}</span><span>{Math.round(max / 2)}</span><span>0</span></div>
+    <svg viewBox="0 0 700 230" preserveAspectRatio="none"><defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#5b8cff" stopOpacity=".32"/><stop offset="1" stopColor="#5b8cff" stopOpacity="0"/></linearGradient></defs><g className="grid-lines"><path d="M0 20H700M0 70H700M0 120H700M0 170H700M0 220H700"/></g><path className="chart-area" d={`${line} L700 230 L0 230 Z`}/><path className="chart-line" d={line}/><g className="chart-dots">{coords.map((point) => <circle key={point.x} cx={point.x} cy={point.y} r="4"/>)}</g></svg>
+    <div className="chart-x">{activity.map((row, index) => <span key={`${row.label}-${index}`}>{row.label}</span>)}</div>
+  </div>;
+}
+
+function Dashboard({ role, navigate, personName }: { role: Role; navigate: (module: string, sub?: string, detail?: string) => void; personName: string }) {
   const teacher = role === "Teacher / Faculty";
   const admin = role === "Administrator";
   const parent = role === "Parent / Guardian / HOD";
@@ -187,9 +225,16 @@ function Dashboard({ role, navigate }: { role: Role; navigate: (module: string, 
     if (!getStoredToken()) return;
     apiFetch<DashboardRecord>("/api/v1/dashboard").then(setLive).catch(() => setLive(null));
   }, []);
-  if(coordinator||principal) return <RoleOversightDashboard role={role} navigate={navigate}/>;
-  const greeting = teacher ? "Good morning, Dr. Chen" : admin ? "Good morning, Olivia" : parent ? "Good morning, Priya" : "Good morning, Aarav";
-  const copy = teacher ? "Here’s what needs your attention across your classes today." : admin ? "Here’s your institution intelligence briefing for today." : parent ? "Here’s how Aarav is progressing this week." : "You’re making strong progress. Keep the momentum going.";
+  if(coordinator||principal) return <RoleOversightDashboard role={role} navigate={navigate} personName={personName}/>;
+  const firstName = personName.trim().split(/\s+/)[0] || "there";
+  const greeting = `Good morning, ${firstName}`;
+  const copy = teacher ? "Here is what your classes and queues show today." : admin ? "Here is the institution briefing from current records." : parent ? "Here is progress for the learners linked to this account." : "Here is what is recorded for this account.";
+  const activity = live?.activity ?? [];
+  const schedule = live?.schedule ?? [];
+  const alerts = live?.alerts ?? [];
+  const completions = activity.reduce((sum, row) => sum + row.completions, 0);
+  const insight = !live ? "Sign in to load records for this institution." : Number(live.metrics.at_risk || 0) > 0 ? `${live.metrics.at_risk} attendance records are below 75%.` : completions > 0 ? `${completions} lessons were completed in the last 7 days.` : "No lesson completions were recorded in the last 7 days.";
+  const signedOut = "Sign in to load records";
   return <div className="page-stack">
     <section className="welcome">
       <div><Badge tone="ai"><Icon name="spark" size={13}/> AI daily briefing</Badge><h1>{greeting}</h1><p>{copy}</p></div>
@@ -197,61 +242,63 @@ function Dashboard({ role, navigate }: { role: Role; navigate: (module: string, 
     </section>
     <div className="kpi-grid">
       {admin ? <>
-        <Kpi label="TOTAL LEARNERS" value={live ? String(live.metrics.courses ?? "—") : "18,420"} delta={live ? "Live API · synthetic tenants" : "+4.8% this term"} icon="student" />
-        <Kpi label="ACTIVE FACULTY" value="1,248" delta="+24 this month" icon="people" color="violet" />
-        <Kpi label="ENGAGEMENT" value="87.4%" delta="+3.2% vs last week" icon="trend" color="cyan" />
-        <Kpi label="AT-RISK" value="284" delta="-18 this week" icon="warning" color="amber" />
+        <Kpi label="TOTAL LEARNERS" value={shown(live?.metrics.learners)} delta={live ? "Active enrollments in this institution" : signedOut} icon="student" />
+        <Kpi label="ACTIVE FACULTY" value={shown(live?.metrics.faculty)} delta={live ? "Teachers in this institution" : signedOut} icon="people" color="violet" />
+        <Kpi label="ENGAGEMENT" value={live ? `${shown(live.metrics.attendance_pct)}%` : "—"} delta={live ? "Average attendance" : signedOut} icon="trend" color="cyan" />
+        <Kpi label="AT-RISK" value={shown(live?.metrics.at_risk)} delta={live ? "Attendance records below 75%" : signedOut} icon="warning" color="amber" />
       </> : teacher ? <>
-        <Kpi label="TODAY'S CLASSES" value="4" delta="Next at 10:30 AM" icon="calendar" />
-        <Kpi label="AWAITING GRADING" value="28" delta="8 due today" icon="assignment" color="violet" />
-        <Kpi label="CLASS ENGAGEMENT" value="84%" delta="+6.2% this week" icon="trend" color="cyan" />
-        <Kpi label="AT-RISK LEARNERS" value="7" delta="2 need review" icon="warning" color="amber" />
+        <Kpi label="TODAY'S CLASSES" value={shown(live?.metrics.classes_today)} delta={live ? "Classes scheduled for today" : signedOut} icon="calendar" />
+        <Kpi label="AWAITING GRADING" value={shown(live?.metrics.ungraded)} delta={live ? "Submissions without a score" : signedOut} icon="assignment" color="violet" />
+        <Kpi label="CLASS ENGAGEMENT" value={live ? `${shown(live.metrics.attendance_pct)}%` : "—"} delta={live ? "Average attendance" : signedOut} icon="trend" color="cyan" />
+        <Kpi label="AT-RISK LEARNERS" value={shown(live?.metrics.at_risk)} delta={live ? "Attendance records below 75%" : signedOut} icon="warning" color="amber" />
       </> : parent ? <>
-        <Kpi label="ATTENDANCE" value="94.2%" delta="+1.2% this month" icon="check" />
-        <Kpi label="AVERAGE GRADE" value="A−" delta="+3.4% this term" icon="grade" color="violet" />
-        <Kpi label="COURSES" value="6" delta="4 on track" icon="book" color="cyan" />
-        <Kpi label="UPCOMING" value="3" delta="Next exam Friday" icon="calendar" color="amber" />
+        <Kpi label="ATTENDANCE" value={live ? `${shown(live.metrics.attendance_pct)}%` : "—"} delta={live ? "Linked learners" : signedOut} icon="check" />
+        <Kpi label="AVERAGE GRADE" value={shown(live?.metrics.average_score)} delta={live ? "Published scores" : signedOut} icon="grade" color="violet" />
+        <Kpi label="COURSES" value={live ? String(live.courses.length) : "—"} delta={live ? "Courses linked to this account" : signedOut} icon="book" color="cyan" />
+        <Kpi label="UPCOMING" value={live ? String(schedule.length) : "—"} delta={live ? "Scheduled classes" : signedOut} icon="calendar" color="amber" />
       </> : <>
-        <Kpi label="COURSE PROGRESS" value={live ? String(live.courses.length) : "72%"} delta={live ? "Enrolled courses (API)" : "+8% this week"} icon="book" />
-        <Kpi label="ATTENDANCE" value={live ? `${live.metrics.attendance_pct ?? 0}%` : "94.2%"} delta={live ? "From attendance records" : "+1.2% this month"} icon="check" color="cyan" />
-        <Kpi label="LEARNING HOURS" value="18.5h" delta="+3.2h this week" icon="clock" color="violet" />
-        <Kpi label="CURRENT STREAK" value="21 days" delta="Personal best" icon="trophy" color="amber" />
+        <Kpi label="ENROLLED COURSES" value={live ? String(live.courses.length) : "—"} delta={live ? "Courses linked to this account" : signedOut} icon="book" />
+        <Kpi label="ATTENDANCE" value={live ? `${shown(live.metrics.attendance_pct)}%` : "—"} delta={live ? "This account" : signedOut} icon="check" color="cyan" />
+        <Kpi label="LESSONS COMPLETED" value={live ? String(completions) : "—"} delta={live ? "Last 7 days" : signedOut} icon="clock" color="violet" />
+        <Kpi label="UPCOMING CLASSES" value={live ? String(schedule.length) : "—"} delta={live ? "Scheduled classes" : signedOut} icon="calendar" color="amber" />
       </>}
     </div>
     <div className="dashboard-grid">
       <section className="card span-2">
-        <div className="section-head"><div><span className="eyebrow">{admin ? "INSTITUTION INTELLIGENCE" : teacher ? "CLASS PERFORMANCE" : "LEARNING OVERVIEW"}</span><h2>{admin ? "Engagement & performance" : teacher ? "Student engagement trend" : "Your progress this week"}</h2></div><select className="select"><option>Last 7 days</option><option>Last 30 days</option></select></div>
-        <div className="chart">
-          <div className="chart-y"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div>
-          <svg viewBox="0 0 700 230" preserveAspectRatio="none"><defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#5b8cff" stopOpacity=".32"/><stop offset="1" stopColor="#5b8cff" stopOpacity="0"/></linearGradient></defs><g className="grid-lines"><path d="M0 20H700M0 70H700M0 120H700M0 170H700M0 220H700"/></g><path className="chart-area" d="M0 190 C60 175 70 145 125 155 S210 120 250 125 S330 72 375 94 S465 45 500 65 S610 35 700 28 V230H0Z"/><path className="chart-line" d="M0 190 C60 175 70 145 125 155 S210 120 250 125 S330 72 375 94 S465 45 500 65 S610 35 700 28"/><g className="chart-dots"><circle cx="125" cy="155" r="4"/><circle cx="250" cy="125" r="4"/><circle cx="375" cy="94" r="4"/><circle cx="500" cy="65" r="4"/><circle cx="700" cy="28" r="4"/></g></svg>
-          <div className="chart-x"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
-        </div>
+        <div className="section-head"><div><span className="eyebrow">LESSON COMPLETIONS</span><h2>Last 7 days</h2></div><Badge>{live ? `${completions} recorded` : "SIGN IN"}</Badge></div>
+        {activity.length ? <ActivityChart activity={activity}/> : <p>Sign in to load lesson completions.</p>}
       </section>
       <section className="card schedule-card">
-        <div className="section-head"><div><span className="eyebrow">TODAY · MAY 22</span><h2>{teacher ? "Teaching schedule" : "Today's schedule"}</h2></div><Button variant="ghost" icon="more"> </Button></div>
+        <div className="section-head"><div><span className="eyebrow">SCHEDULED CLASSES</span><h2>{teacher ? "Teaching schedule" : "Upcoming classes"}</h2></div><Badge>{schedule.length ? `${schedule.length} listed` : "NONE"}</Badge></div>
         <div className="timeline">
-          {[["09:00", teacher ? "Mathematics · Grade 10A" : "Mathematics", "Room 204", "blue"], ["11:30", teacher ? "Faculty planning" : "Physics Lab", teacher ? "Academic block" : "Science lab", "violet"], ["14:00", teacher ? "Student support session" : "Data Science", "Online classroom", "cyan"]].map(([time, title, place, tone]) => <div className="timeline-row" key={time}><span>{time}</span><div className={`timeline-mark ${tone}`}/><div><strong>{title}</strong><small>{place}</small></div></div>)}
+          {schedule.length ? schedule.map((item) => <div className="timeline-row" key={`${item.when}-${item.title}`}><span>{item.when}</span><div className="timeline-mark blue"/><div><strong>{item.title}</strong><small>{item.course}</small></div></div>) : <p>{live ? "No classes are scheduled." : signedOut}</p>}
         </div><Button className="full" onClick={() => navigate("Calendar")}>Open full calendar</Button>
       </section>
       <section className="card">
-        <div className="section-head"><div><span className="eyebrow">ACTION CENTER</span><h2>{teacher ? "Needs your attention" : admin ? "Priority alerts" : "Next up"}</h2></div><Badge tone="warning">3 priority</Badge></div>
+        <div className="section-head"><div><span className="eyebrow">FROM YOUR RECORDS</span><h2>{teacher ? "Needs your attention" : admin ? "Priority alerts" : "Next up"}</h2></div><Badge>{alerts.length ? `${alerts.length} open` : "NONE"}</Badge></div>
         <div className="action-list">
-          {teacher ? [["warning", "Review at-risk learners", "7 students flagged by early warning"], ["assignment", "Grade Physics submissions", "18 submissions · due today"], ["chat", "Reply to Sofia's guardian", "Message received 1h ago"]] : admin ? [["warning", "Attendance anomaly", "Grade 12 attendance is down 6%"], ["shield", "Security review", "2 unusual login events"], ["data", "Pipeline delay", "Assessment sync delayed by 18m"]] : [["assignment", "Submit Physics lab report", "Due today · 11:59 PM"], ["assessment", "Mathematics practice quiz", "12 questions · 15 minutes"], ["book", "Continue Data Science", "Module 4 · 68% complete"]].map(([icon, title, meta], i) => <button className="action-row" key={title} onClick={() => i === 0 && navigate(teacher ? "Student Success" : admin ? "Analytics" : "Assignments")}><span className="action-icon"><Icon name={icon as IconName}/></span><span><strong>{title}</strong><small>{meta}</small></span><Icon name="chevron" size={15}/></button>)}
+          {alerts.length ? alerts.map((item) => <button className="action-row" key={`${item.module}-${item.title}`} onClick={() => navigate(item.module, item.sub || undefined)}><span className="action-icon"><Icon name={alertIcon(item.module)}/></span><span><strong>{item.title}</strong><small>{item.detail}</small></span><Icon name="chevron" size={15}/></button>) : <p>{live ? "Nothing in your records needs attention." : signedOut}</p>}
         </div>
       </section>
       <section className="card span-2 ai-insight">
-        <div className="ai-orb"><Icon name="spark" size={22}/></div><div className="insight-copy"><span className="eyebrow">INTELUNIVEN AI INSIGHT · SAMPLE DATA</span><h2>{teacher ? "Three learners may benefit from a targeted algebra review." : admin ? "Grade 10 engagement is improving, but attendance remains a leading risk indicator." : "You're strongest in Algebra. A short Trigonometry review could lift your mastery by 8–12%."}</h2><p>{teacher ? "Recent quiz patterns show a shared misconception around quadratic factorization." : "Based on recent learning activity, assessment performance and attendance patterns."}</p></div><Button variant="primary" onClick={() => navigate(teacher ? "Student Success" : admin ? "Analytics" : "Adaptive Learning")}>View recommendation</Button>
+        <div className="ai-orb"><Icon name="spark" size={22}/></div><div className="insight-copy"><span className="eyebrow">FROM ATTENDANCE AND LESSONS</span><h2>{insight}</h2><p>Counts come from attendance records and completed lessons. They are not a forecast.</p></div><Button variant="primary" onClick={() => navigate(Number(live?.metrics.at_risk || 0) > 0 ? "Attendance" : "Courses")}>Open the records</Button>
       </section>
     </div>
   </div>;
 }
 
-function RoleOversightDashboard({role,navigate}:{role:Role;navigate:(module:string,sub?:string,detail?:string)=>void}) {
+function RoleOversightDashboard({role,navigate,personName}:{role:Role;navigate:(module:string,sub?:string,detail?:string)=>void;personName:string}) {
   const coordinator=role==="Training Coordinator";
+  const [live,setLive]=useState<DashboardRecord|null>(null);
+  useEffect(()=>{if(!getStoredToken())return;apiFetch<DashboardRecord>("/api/v1/dashboard").then(setLive).catch(()=>setLive(null));},[]);
+  const attempts=Number(live?.metrics.attempt_total||0);
+  const published=Number(live?.metrics.published_attempts||0);
+  const complete=attempts?`${Math.round((published/attempts)*100)}%`:"—";
   const cards=coordinator
-    ? [["ASSIGNED STUDENTS","86","Across authorized batches","student"],["ACTIVE BATCHES","3","Oracle Apps · Java · Testing","people"],["ATTENDANCE","92.8%","+1.4% this month","check"],["ASSESSMENTS COMPLETE","84%","Across assigned batches","assessment"],["PENDING VERIFICATION","8","Missing or changed marks","warning"],["RESULTS PUBLISHED","2","One awaiting approval","report"]]
-    : [["ACTIVE BATCHES","18","Within Northstar institution","people"],["COMPLETION","84.6%","+4.2% this quarter","trend"],["ATTENDANCE","92.8%","Institution consolidated","check"],["ASSESSMENT AVG","81.4%","+2.6% vs prior cohort","assessment"]];
-  return <div className="page-stack"><section className="welcome"><div><Badge tone="ai"><Icon name={coordinator?"assessment":"chart"} size={13}/> {coordinator?"ASSIGNED-SCOPE WORKSPACE":"INSTITUTION OVERSIGHT"}</Badge><h1>{coordinator?"Good morning, Riya":"Good morning, David"}</h1><p>{coordinator?"Complete scoresheet work for your allocated batches only.":"Review consolidated learning outcomes across your authorized institution."}</p></div><Button variant="primary" icon={coordinator?"grade":"report"} onClick={()=>navigate(coordinator?"Assessments":"Analytics",coordinator?"Results":"Course Analytics")}>{coordinator?"Open batch scoresheets":"View training reports"}</Button></section><div className="kpi-grid">{cards.map(([label,value,delta,icon],i)=><Kpi key={label} label={label} value={value} delta={delta} icon={icon as IconName} color={i===1?"cyan":i===2?"violet":i===3?"amber":"blue"}/>)}</div><div className="content-grid"><section className="card span-2 role-scope-card"><div className="section-head"><div><span className="eyebrow">{coordinator?"MY ALLOCATED BATCHES":"TRAINING PERFORMANCE"}</span><h2>{coordinator?"Scoresheet readiness":"Authorized institution overview"}</h2></div><Badge tone="success">TENANT SCOPED</Badge></div>{(coordinator?[["Oracle Apps OA-24","Final SQL scoresheet","Due today"],["Java Full Stack JF-12","Coding assessment","18 of 22 reviewed"],["Testing Academy QA-08","MCQ results","Ready to export"]]:[["Oracle Apps OA-24","91% attendance","78% complete"],["Java Full Stack JF-12","88% attendance","84% complete"],["Testing Academy QA-08","95% attendance","92% complete"]]).map(([name,signal,status])=><button className="scope-row" key={name} onClick={()=>navigate(coordinator?"Assessments":"Analytics",coordinator?"Results":"Cohort Analytics",name)}><span className="list-icon tone-blue"><Icon name={coordinator?"assessment":"chart"}/></span><span><strong>{name}</strong><small>{signal}</small></span><Badge>{status}</Badge><Icon name="chevron"/></button>)}</section><aside className="card role-boundary"><Icon name="shield" size={28}/><span className="eyebrow">ACCESS BOUNDARY</span><h2>{coordinator?"Assigned batches only":"Northstar institution only"}</h2><p>Search, exports, learner records and analytics are restricted to this authorized scope.</p><Button className="full" onClick={()=>navigate("Calendar","My Calendar")}>Open schedule</Button></aside></div></div>;
+    ? [["ASSIGNED STUDENTS",shown(live?.metrics.batch_students),"Learners in batches","student"],["ACTIVE BATCHES",shown(live?.metrics.batches),"Cohorts in this institution","people"],["ATTENDANCE",live?`${shown(live.metrics.attendance_pct)}%`:"—","Average attendance","check"],["ASSESSMENTS COMPLETE",live?complete:"—","Published attempts","assessment"],["PENDING VERIFICATION",shown(live?.metrics.pending_scorecards),"Scorecards waiting","warning"],["RESULTS PUBLISHED",shown(live?.metrics.published_scorecards),"Published scorecards","report"]]
+    : [["ACTIVE BATCHES",shown(live?.metrics.batches),"Cohorts in this institution","people"],["COMPLETION",live?complete:"—","Published attempts","trend"],["ATTENDANCE",live?`${shown(live.metrics.attendance_pct)}%`:"—","Average attendance","check"],["ASSESSMENT AVG",shown(live?.metrics.average_score),"Published scores","assessment"]];
+  const overview=live?.overview??[];
+  return <div className="page-stack"><section className="welcome"><div><Badge tone="ai"><Icon name={coordinator?"assessment":"chart"} size={13}/> {coordinator?"ASSIGNED-SCOPE WORKSPACE":"INSTITUTION OVERSIGHT"}</Badge><h1>{`Good morning, ${personName.trim().split(/\s+/)[0] || "there"}`}</h1><p>{coordinator?"Complete scoresheet work for your allocated batches only.":"Review consolidated learning outcomes across your authorized institution."}</p></div><Button variant="primary" icon={coordinator?"grade":"report"} onClick={()=>navigate(coordinator?"Assessments":"Reports",coordinator?"Results":"Reports")}>{coordinator?"Open batch scoresheets":"View training reports"}</Button></section><div className="kpi-grid">{cards.map(([label,value,delta,icon],i)=><Kpi key={label} label={label} value={value} delta={live?delta:"Sign in to load records"} icon={icon as IconName} color={i===1?"cyan":i===2?"violet":i===3?"amber":"blue"}/>)}</div><div className="content-grid"><section className="card span-2 role-scope-card"><div className="section-head"><div><span className="eyebrow">BATCHES</span><h2>{coordinator?"Scoresheet readiness":"Authorized institution overview"}</h2></div><Badge>{overview.length?`${overview.length} batches`:"NONE"}</Badge></div>{overview.length?overview.map((row)=><button className="scope-row record" key={row.name} onClick={()=>navigate("Administration","Batches")}><span><strong>{row.name}</strong><small>{row.signal}</small></span><Badge>{row.status}</Badge></button>):<p>{live?"No batches are recorded for this institution.":"Sign in to load batches."}</p>}</section><aside className="card role-boundary"><Icon name="shield" size={28}/><span className="eyebrow">ACCESS BOUNDARY</span><h2>{coordinator?"Assigned batches only":"This institution only"}</h2><p>Search, exports, learner records and analytics are restricted to this authorized scope.</p><Button className="full" onClick={()=>navigate("Calendar","My Calendar")}>Open schedule</Button></aside></div></div>;
 }
 
 const syntheticCourses = [
@@ -286,7 +333,7 @@ function Courses({ navigate, role }: { navigate: (module: string, sub?: string, 
   const courses=catalog.filter(course=>(category==="All"||course.category===category)&&`${course.title} ${course.category} ${course.desc}`.toLowerCase().includes(query.toLowerCase()));
   const open=(course:{id?:string;title:string})=>navigate("Courses","My Courses",courseKey(course));
   return <div className="page-stack">
-    <section className="title-row"><div><Badge tone="ai">{apiNote||"LEARNING MANAGEMENT · SYNTHETIC DATA"}</Badge><h1>{role==="Student"?"My Courses":"Enterprise Technology Courses"}</h1><p>{role==="Student"?"Continue assigned training and track your personal completion.":"Explore sample learning paths across applications, engineering, infrastructure, data and AI."}</p></div>{["Teacher / Faculty","Administrator"].includes(role)&&<Button variant="primary" icon="plus" onClick={() => navigate("Courses", "Course Builder", "builder")}>Create course</Button>}</section>
+    <section className="title-row"><div><Badge tone="ai">{apiNote||"LEARNING MANAGEMENT · SYNTHETIC DATA"}</Badge><h1>{role==="Student"?"My Courses":"Enterprise Technology Courses"}</h1><p>{role==="Student"?"Continue assigned training and track your personal completion.":"Explore sample learning paths across applications, engineering, infrastructure, data and AI."}</p></div>{(loadStoredSession()?.permissions?hasPermission(loadStoredSession()?.permissions,"course:create"):["Teacher / Faculty","Administrator"].includes(role))&&<Button variant="primary" icon="plus" onClick={() => navigate("Courses", "Course Builder", "builder")}>Create course</Button>}</section>
     <div className="filterbar"><div className="search-field"><Icon name="search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search SAP, Oracle, Java, AWS and more..." /></div><Button icon="filter" onClick={()=>{setCategory("All");setQuery("")}}>Clear filters</Button><div className="view-toggle"><button className="active">Grid</button><button>List</button></div></div>
     <div className="course-category-filter">{categories.map(item=><button className={category===item?"active":""} key={item} onClick={()=>setCategory(item)}>{item}</button>)}</div>
     <div className="course-grid">
@@ -386,13 +433,13 @@ function Lesson({ detail, navigate }: { detail: string; navigate: (module: strin
 }
 
 function StudyBuddy({ initialPractice = false, navigate }: { initialPractice?: boolean; navigate?: (module: string, sub?: string, detail?: string) => void }) {
-  const [messages, setMessages] = useState<{from:"ai"|"me"; text:string}[]>(initialPractice ? [
-    {from:"ai",text:"Let’s practice completing the square. I’ll adapt the difficulty as we go."},
-    {from:"ai",text:"Rewrite x² + 8x + 7 in vertex form. What value should be added and subtracted to complete the square?"},
+  const [messages, setMessages] = useState<{from:"ai"|"me"; text:string; citations?: {title:string}[]; sample?: boolean}[]>(initialPractice ? [
+    {from:"ai",text:"Let’s practice completing the square. I’ll adapt the difficulty as we go.", sample:true},
+    {from:"ai",text:"Rewrite x² + 8x + 7 in vertex form. What value should be added and subtracted to complete the square?", sample:true},
   ] : [
     {from:"me",text:"Can you explain completing the square in a simpler way?"},
-    {from:"ai",text:"Think of it as turning a nearly-square expression into a perfect square. For x² + 6x, take half of 6 (which is 3), then square it (which is 9). Add and subtract 9 so the value stays unchanged."},
-    {from:"ai",text:"That gives x² + 6x + 9 − 9 = (x + 3)² − 9. You’ve changed the form, not the value."},
+    {from:"ai",text:"Think of it as turning a nearly-square expression into a perfect square. For x² + 6x, take half of 6 (which is 3), then square it (which is 9). Add and subtract 9 so the value stays unchanged.", sample:true},
+    {from:"ai",text:"That gives x² + 6x + 9 − 9 = (x + 3)² − 9. You’ve changed the form, not the value.", sample:true},
   ]);
   const [input,setInput]=useState("");
   const [pending,setPending]=useState(false);
@@ -403,28 +450,34 @@ function StudyBuddy({ initialPractice = false, navigate }: { initialPractice?: b
     setMessages(current=>[...current,{from:"me",text}]);
     const session=loadStoredSession();
     if(!session){
-      setMessages(current=>[...current,{from:"ai",text:"Good question. Based on your current lesson, the next step is to identify half of the x coefficient, square it, and balance the expression. Would you like a worked example or a practice question?"}]);
+      setMessages(current=>[...current,{from:"ai",text:"Sign in to ask Study Buddy. Replies use course materials retrieved for your account.", sample:true}]);
       return;
     }
     setPending(true);
     try{
       const result=await api.studyBuddy(session.access_token,text);
-      setMessages(current=>[...current,{from:"ai",text:`${result.mock?"[MOCK AI] ":""}${result.reply}`}]);
+      setMessages(current=>[...current,{from:"ai",text:`${result.mock?"[MOCK AI] ":""}${result.reply}`, citations: result.citations}]);
     }catch(err){
       setMessages(current=>[...current,{from:"ai",text:err instanceof Error?err.message:"Study Buddy is unavailable."}]);
     }finally{
       setPending(false);
     }
   };
+  const signedIn = Boolean(loadStoredSession());
+  const myInitials = nameInitials(loadStoredSession()?.display_name || "");
   return <div className="buddy-layout">
     <aside className="conversation-list"><Button variant="primary" icon="plus" className="full">New conversation</Button><span className="eyebrow">TODAY</span>{["Completing the square","Quadratic formula help","Module 3 study notes"].map((x,i)=><button className={i===0?"active":""} key={x}><Icon name="chat"/><span><strong>{x}</strong><small>{i===0?"Just now":`${i+1} hours ago`}</small></span></button>)}<span className="eyebrow">PREVIOUS</span>{["Physics lab review","Statistics flashcards"].map(x=><button key={x}><Icon name="chat"/><span><strong>{x}</strong><small>Yesterday</small></span></button>)}</aside>
-    <main className="chat-main"><div className="chat-head"><div className="ai-avatar"><Icon name="spark"/></div><div><h2>IntelUniVen AI Study Buddy</h2><span><i/> Context-aware · Mathematics Grade 10</span></div><Button variant="ghost" icon="more"> </Button></div>
+    <main className="chat-main"><div className="chat-head"><div className="ai-avatar"><Icon name="spark"/></div><div><h2>IntelUniVen AI Study Buddy</h2><span><i/> {signedIn ? "Grounded in your institution materials" : "Sample context until you sign in"}</span></div><Button variant="ghost" icon="more"> </Button></div>
       <div className="chat-body"><div className="chat-intro"><div className="ai-orb large"><Icon name="spark" size={30}/></div><h1>{initialPractice?"Adaptive practice":"How can I help you learn today?"}</h1><p>I’m using your current course and lesson context to give relevant, grounded support.</p></div>
-      {messages.map((m,i)=><div className={`message ${m.from}`} key={i}>{m.from==="ai"&&<div className="ai-avatar small"><Icon name="spark" size={14}/></div>}<div className="bubble">{m.text}{m.from==="ai"&&i>0&&<div className="citation"><Icon name="file" size={13}/> Source: Module 3 · Lesson 3.3 <button>View</button></div>}</div>{m.from==="me"&&<Avatar initials="AS"/>}</div>)}</div>
+      {messages.map((m, i) => {
+        const source = m.citations && m.citations.length ? `Source: ${m.citations.map((c) => c.title).join(", ")}` : m.sample ? "Sample explanation. It is not a source from your course." : "No course source was retrieved for this reply.";
+        return <div className={`message ${m.from}`} key={i}>{m.from==="ai" && <div className="ai-avatar small"><Icon name="spark" size={14}/></div>}<div className="bubble">{m.text}{m.from==="ai" && <div className="citation"><Icon name="file" size={13}/> {source}</div>}</div>{m.from==="me" && <Avatar initials={myInitials}/>}</div>;
+      })}
       <div className="suggestions">{["Explain this","Give an example","Teach step-by-step","Quiz me","Create notes","Show prerequisite"].map((x,i)=><button key={x} onClick={()=>i===0&&navigate?.("AI Study Buddy","Ask AI","Contextual Explanation")}>{x}</button>)}</div>
       <div className="chat-input"><button><Icon name="plus"/></button><input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="Ask anything about what you're learning..." /><button className="send" onClick={send}><Icon name="send"/></button></div><small className="ai-disclaimer">AI can make mistakes. Verify important information with your course materials.</small>
+      </div>
     </main>
-    <aside className="context-panel"><span className="eyebrow">LEARNING CONTEXT</span><div className="context-course"><div className="mini-cover">M10</div><div><strong>Mathematics Grade 10</strong><small>Module 3 · Lesson 3.3</small></div></div><hr/><div className="mastery-head"><span>Topic mastery</span><strong>61%</strong></div><div className="progress"><span style={{width:"61%"}}/></div><div className="context-stat"><span>Knowledge level</span><Badge tone="warning">Developing</Badge></div><div className="context-stat"><span>Learning goal</span><strong>Master quadratics</strong></div><span className="eyebrow">WEAK AREAS</span><div className="skill-chip">Completing the square <span>54%</span></div><div className="skill-chip">Graph transformations <span>62%</span></div><div className="context-tip"><Icon name="spark"/><p>Your answers suggest reviewing sign changes when moving terms.</p></div></aside>
+    <aside className="context-panel"><span className="eyebrow">LEARNING CONTEXT</span><div className="context-course"><div className="mini-cover">AI</div><div><strong>{signedIn ? "Retrieved for your account" : "Sample context"}</strong><small>{signedIn ? "Answers use approved materials for your institution." : "Sign in to ground answers in your courses."}</small></div></div><hr/><Badge tone="warning">SAMPLE PANEL</Badge><p>The algebra examples in a new chat are sample prompts. A reply cites a course source only when retrieval returns one.</p></aside>
   </div>;
 }
 
@@ -1361,7 +1414,7 @@ function TrainingCalendar({role}:{role:Role}) {
 function GenericWorkspace({ module, sub, detail, navigate }: { module: string; sub: string; detail:string; navigate:(module:string,sub?:string,detail?:string)=>void }) {
  const info=moduleDetails[module] || {title:sub||module,description:`Manage ${sub?.toLowerCase() || module.toLowerCase()} across your institution with connected workflows and intelligence.`,metrics:[["24","Active items"],["92%","Completion rate"],["6","Needs attention"]],rows:[["Current workspace","Active","Updated today"],["Team workflow","In progress","Updated yesterday"],["Institution policy","Published","Updated May 18"]]};
  if(detail) return <GenericActionDetail title={detail} onBack={()=>navigate(module,sub)}/>;
- return <div className="page-stack"><section className="title-row"><div><Badge>{module.toUpperCase()}</Badge><h1>{sub || info.title}</h1><p>{info.description}</p></div><Button variant="primary" icon="plus" onClick={()=>navigate(module,sub,`New ${sub}`)}>Create new</Button></section><div className="submodule-strip">{[...(submodules[module]||[]).slice(0,6),...((module==="Administration"?["Billing"]:[]).concat(sub&&(submodules[module]||[]).includes(sub)?[sub]:[]).filter((x,i,all)=>!(submodules[module]||[]).slice(0,6).includes(x)&&all.indexOf(x)===i))].map(x=><button className={x===sub?"active":""} onClick={()=>navigate(module,x)} key={x}>{x}</button>)}</div><div className="kpi-grid compact">{info.metrics.map(([v,l],i)=><Kpi key={l} value={v} label={l.toUpperCase()} delta={i===1?"+2.4% this month":"Live data"} icon={i===0?"trend":i===1?"check":"warning"} color={i===1?"cyan":i===2?"amber":"blue"}/>)}</div><div className="content-grid"><section className="card span-2 table-card"><div className="section-head"><div><span className="eyebrow">WORKSPACE</span><h2>{info.title}</h2></div><div className="row-actions"><Button icon="filter">Filter</Button><Button icon="more"> </Button></div></div><div className="simple-table"><div className="simple-row head"><span>Name</span><span>Type / status</span><span>Details</span><span/></div>{info.rows.map((r,i)=><button className="simple-row" key={r[0]} onClick={()=>navigate(module,sub,r[0])}><span><span className={`list-icon tone-${i===1?"violet":"blue"}`}><Icon name={i===0?"file":i===1?"data":"check"}/></span><strong>{r[0]}</strong></span><span><Badge tone={r[1].match(/healthy|active|connected/i)?"success":r[1].match(/warning|degraded/i)?"warning":"default"}>{r[1]}</Badge></span><span>{r[2]}</span><Icon name="chevron"/></button>)}</div></section><aside className="card"><div className="ai-orb"><Icon name="spark"/></div><span className="eyebrow">AI RECOMMENDATION</span><h2>Focus on what needs attention</h2><p>IntelUniVen AI has identified three items with recent changes that may benefit from review.</p><Button className="full" onClick={()=>navigate(module,sub,info.rows[0][0])}>Review suggestions</Button><hr/><span className="eyebrow">QUICK ACTIONS</span><button className="quick-link" onClick={()=>navigate("Analytics")}>View analytics<Icon name="chevron"/></button><button className="quick-link" onClick={()=>navigate(module,sub,"Invite collaborator")}>Invite collaborator<Icon name="chevron"/></button><button className="quick-link" onClick={()=>navigate(module,sub,"Export data")}>Export data<Icon name="chevron"/></button></aside></div></div>;
+ return <div className="page-stack"><section className="title-row"><div><Badge>{module.toUpperCase()}</Badge><h1>{sub || info.title}</h1><p>{info.description}{module==="Teaching Copilot"?" The rows below are samples and are not saved. Create a real question in the Question Bank.":" These rows are samples and are not saved."}</p></div><Button variant="primary" icon="plus" onClick={()=>module==="Teaching Copilot"?navigate("Assessments","Question Bank"):navigate(module,sub,`New ${sub}`)}>{module==="Teaching Copilot"?"Create in Question Bank":"Create new"}</Button></section><div className="submodule-strip">{[...(submodules[module]||[]).slice(0,6),...((module==="Administration"?["Billing"]:[]).concat(sub&&(submodules[module]||[]).includes(sub)?[sub]:[]).filter((x,i,all)=>!(submodules[module]||[]).slice(0,6).includes(x)&&all.indexOf(x)===i))].map(x=><button className={x===sub?"active":""} onClick={()=>navigate(module,x)} key={x}>{x}</button>)}</div><div className="kpi-grid compact">{info.metrics.map(([v,l],i)=><Kpi key={l} value={v} label={l.toUpperCase()} delta={i===1?"Sample list":"Sample list"} icon={i===0?"trend":i===1?"check":"warning"} color={i===1?"cyan":i===2?"amber":"blue"}/>)}</div><div className="content-grid"><section className="card span-2 table-card"><div className="section-head"><div><span className="eyebrow">WORKSPACE</span><h2>{info.title}</h2></div><div className="row-actions"><Button icon="filter">Filter</Button><Button icon="more"> </Button></div></div><div className="simple-table"><div className="simple-row head"><span>Name</span><span>Type / status</span><span>Details</span><span/></div>{info.rows.map((r,i)=><button className="simple-row" key={r[0]} onClick={()=>navigate(module,sub,r[0])}><span><span className={`list-icon tone-${i===1?"violet":"blue"}`}><Icon name={i===0?"file":i===1?"data":"check"}/></span><strong>{r[0]}</strong></span><span><Badge tone={r[1].match(/healthy|active|connected/i)?"success":r[1].match(/warning|degraded/i)?"warning":"default"}>{r[1]}</Badge></span><span>{r[2]}</span><Icon name="chevron"/></button>)}</div></section><aside className="card"><div className="ai-orb"><Icon name="spark"/></div><span className="eyebrow">AI RECOMMENDATION</span><h2>Focus on what needs attention</h2><p>IntelUniVen AI has identified three items with recent changes that may benefit from review.</p><Button className="full" onClick={()=>navigate(module,sub,info.rows[0][0])}>Review suggestions</Button><hr/><span className="eyebrow">QUICK ACTIONS</span><button className="quick-link" onClick={()=>navigate("Analytics")}>View analytics<Icon name="chevron"/></button><button className="quick-link" onClick={()=>navigate(module,sub,"Invite collaborator")}>Invite collaborator<Icon name="chevron"/></button><button className="quick-link" onClick={()=>navigate(module,sub,"Export data")}>Export data<Icon name="chevron"/></button></aside></div></div>;
 }
 
 function AuthShowcase({mode}:{mode:"login"|"signup"}) {
@@ -1431,12 +1484,15 @@ export default function App() {
   const [roleMenu,setRoleMenu]=useState(false);
   const [mobileNav,setMobileNav]=useState(false);
   const [fontScale,setFontScale]=useState<FontScale>(()=>{const scale=readFontScale();document.documentElement.dataset.fontScale=scale;return scale});
+  const [copilotDraft,setCopilotDraft]=useState("");
+  const [copilotReply,setCopilotReply]=useState("");
+  const [copilotBusy,setCopilotBusy]=useState(false);
   useEffect(()=>{document.documentElement.dataset.fontScale=fontScale;try{localStorage.setItem(fontScaleKey,fontScale)}catch{/* ignore storage failures */}},[fontScale]);
   const navigate=(m:string,s?:string,d?:string)=>{setModule(m);setSub(s||submodules[m]?.[0]||m);setDetail(d||"");setMobileNav(false);window.scrollTo({top:0,behavior:"smooth"})};
-  const allowedModules=useMemo(()=>new Set(visibleModules(role,liveSession?.roles??[])),[role,liveSession]);
+  const allowedModules=useMemo(()=>new Set(visibleModules(role,liveSession?.roles??[],liveSession?.permissions)),[role,liveSession]);
   const visibleNav=useMemo(()=>navSections.map(section=>({...section,items:section.items.filter(([name])=>allowedModules.has(name))})).filter(x=>x.items.length),[allowedModules]);
-  const profile=roleProfiles[role];
-  const canCreate=role==="Teacher / Faculty"||role==="Administrator";
+  const profile=liveSession?{...roleProfiles[role],name:liveSession.display_name||roleProfiles[role].name,initials:nameInitials(liveSession.display_name||roleProfiles[role].name),email:liveSession.email||roleProfiles[role].email}:roleProfiles[role];
+  const canCreate=liveSession?.permissions?hasPermission(liveSession.permissions,"course:create")||hasPermission(liveSession.permissions,"cohort:manage")||hasPermission(liveSession.permissions,"assignment:create"):role==="Teacher / Faculty"||role==="Administrator";
   const searchSuggestions=role==="Student"
     ? [["Continue my Oracle SQL training","Courses","book"],["Show my upcoming assignments","Assignments","assignment"],["Open my attendance report","Attendance","check"]]
     : role==="Training Coordinator"
@@ -1453,6 +1509,8 @@ export default function App() {
     setRole(mapBackendRole(stored.roles));
     setInstitution(stored.institution_name);
     setAuthenticated(true);
+    const checkout=new URLSearchParams(window.location.search).get("checkout");
+    if(checkout){setModule("Administration");setSub("Billing");setDetail(`checkout:${checkout}`);}
   },[]);
   const enterPlatform=(nextRole:Role,nextInstitution:string,nextSession?:Session|null)=>{setRole(nextRole);setInstitution(nextInstitution);setLiveSession(nextSession??loadStoredSession());setAuthenticated(true);setAuthView("login");setModule("Dashboard");setSub("My Dashboard")};
   const enterLive=(nextRole:Role,nextInstitution:string,session:Session)=>{setLiveSession(session);enterPlatform(nextRole,nextInstitution)};
@@ -1461,7 +1519,7 @@ export default function App() {
   const contextPrompt=module==="AI Study Buddy"?"Explain quadratic equations.":module==="Adaptive Learning"?"Why did difficulty increase?":module==="Student Success"?"Summarize the evidence behind this student's academic-risk flag.":module==="Assignments"?"Summarize the assignment items that need teacher review.":module==="Assessments"&&sub==="Proctoring"?"Summarize integrity signals that require human review.":module==="Gamification"?"Recommend a healthy DQ learning experience and explain why.":module==="Data Security & Privacy"?"Summarize tenant isolation and privacy policy exceptions.":module==="Courses"?"Create a quiz from Module 3":module==="Analytics"?"Why is student engagement declining?":module==="Student Information"?"Summarize this learner's progress":module==="Administration"?"Show institutions with declining usage":`Help me with ${module}`;
   const live=Boolean(liveSession&&getStoredToken());
   let content:React.ReactNode;
-  if(module==="Dashboard") content=<Dashboard role={role} navigate={navigate}/>;
+  if(module==="Dashboard") content=<Dashboard role={role} navigate={navigate} personName={profile.name}/>;
   else if(module==="Courses"&&!detail) content=<Courses navigate={navigate} role={role}/>;
   else if(module==="Courses"&&detail.startsWith("lesson")) content=<Lesson detail={detail} navigate={navigate}/>;
   else if(module==="Courses"&&detail&&detail!=="builder") content=<CourseDetail title={detail} navigate={navigate}/>;
@@ -1493,7 +1551,7 @@ export default function App() {
   else if(module==="AI Study Buddy"&&sub==="Ask AI"&&detail) content=<StudyActionDetail sub="Ask AI" detail={detail} navigate={navigate}/>;
   else if(module==="AI Study Buddy") content=<StudyFunctionWorkspace sub={sub} detail={detail} navigate={navigate}/>;
   else if(module==="Adaptive Learning") content=<AdaptiveDeepDive sub={sub} detail={detail} navigate={navigate}/>;
-  else if(live&&module==="Student Information"&&role==="Training Coordinator") content=<LiveRoster variant="batch"/>;
+  else if(live&&module==="Student Information"&&(role==="Training Coordinator"||role==="Administrator")) content=<><LiveCompletionReport/><LiveRoster variant="batch"/></>;
   else if(module==="Student Information"&&role==="Training Coordinator") content=<CoordinatorBatchManagement navigate={navigate}/>;
   else if(module==="Student Information"&&!detail) content=<StudentInfo navigate={navigate}/>;
   else if(module==="Student Information"&&detail) content=<Student360 name={detail} navigate={navigate}/>;
@@ -1506,6 +1564,7 @@ export default function App() {
   else if(module==="Assessments"&&role==="Student") content=<StudentExamCenter navigate={navigate}/>;
   else if(live&&module==="Assessments"&&sub==="Proctoring") content=<LiveProctoring/>;
   else if(live&&module==="Assessments"&&role==="Training Coordinator") content=<LiveScores/>;
+  else if(live&&module==="Assessments"&&sub==="Results"&&(role==="Administrator"||role==="Principal / L&D Lead")) content=<LiveScores/>;
   else if(live&&module==="Assessments"&&(sub==="Quiz Builder"||sub==="Question Bank")&&(role==="Teacher / Faculty"||role==="Administrator")) content=<LiveQuestionBank/>;
   else if(module==="Assessments"&&role==="Training Coordinator"&&sub==="Proctoring") content=<AssessmentProctoring detail={detail} navigate={navigate}/>;
   else if(module==="Assessments"&&role==="Training Coordinator") content=<CoordinatorScores detail={detail} navigate={navigate}/>;
@@ -1515,9 +1574,16 @@ export default function App() {
   else if(module==="Assessments") content=<AssessmentSectionWorkspace sub={sub} detail={detail} navigate={navigate}/>;
   else if(live&&module==="Analytics"&&(role==="Principal / L&D Lead"||role==="Administrator")) content=<><LiveCompletionReport/><AnalyticsWorkspace sub={sub} detail={detail} navigate={navigate}/></>;
   else if(module==="Analytics") content=<AnalyticsWorkspace sub={sub} detail={detail} navigate={navigate}/>;
-  else if(live&&module==="Administration"&&sub==="Billing") content=<LiveBilling/>;
+  else if(live&&module==="Administration"&&sub==="Batches") content=<LiveCompletionReport/>;
+  else if(live&&module==="Administration"&&sub==="Billing") content=<>{detail.startsWith("checkout:")?<CheckoutStatus id={detail.slice(9)}/>:null}<LiveBilling/></>;
+  else if(live&&module==="Administration"&&sub==="Roles"&&hasPermission(liveSession?.permissions,"user:assign_role")) content=<RoleAccess/>;
+  else if(live&&module==="Administration"&&sub==="Plans") content=<PlanCatalogue/>;
+  else if(live&&module==="Reports"&&(role==="Administrator"||role==="Training Coordinator"||role==="Principal / L&D Lead")) content=<LiveScores/>;
+  else if(live&&module==="Teaching Copilot"&&sub==="Content Generator") content=<LiveQuestionBank/>;
+  else if(live&&module==="Teaching Copilot"&&(sub==="Lesson Planner"||sub==="Quiz Generator"||sub==="Rubric Generator"||sub==="Teaching Insights"||sub==="Student Support")) content=<TeachingDesk sub={sub} navigate={navigate}/>;
   else if(module==="Calendar") content=<TrainingCalendar role={role}/>;
   else content=<GenericWorkspace module={module} sub={sub} detail={detail} navigate={navigate}/>;
+  const askCopilot=async(text:string)=>{const question=text.trim();if(!question||copilotBusy)return;const session=loadStoredSession();if(!session){setCopilotReply("Sign in to use the copilot.");return}setCopilotBusy(true);try{const result=await api.studyBuddy(session.access_token,question);const sources=result.citations.length?` Source: ${result.citations.map(item=>item.title).join(", ")}`:" No course source was retrieved.";setCopilotReply(`${result.mock?"[MOCK AI] ":""}${result.reply}${sources}`)}catch(err){setCopilotReply(err instanceof Error?err.message:"Copilot is unavailable.")}finally{setCopilotBusy(false)}};
   return <div className={`app ${sidebar?"":"sidebar-collapsed"} ${copilot?"copilot-open":""}`}>
     <aside className={`sidebar ${mobileNav?"mobile-open":""}`}>
       <div className="brand"><BrandLogo compact/>{sidebar&&<div><strong>IntelUniVen <em>AI</em></strong><small>EDU LAB</small></div>}<button className="collapse-btn" onClick={()=>setSidebar(!sidebar)}><Icon name={sidebar?"arrow":"chevron"}/></button></div>
@@ -1525,11 +1591,11 @@ export default function App() {
       <div className="sidebar-footer"><button onClick={()=>setCopilot(true)}><span className="ai-nav-icon"><Icon name="spark"/></span>{sidebar&&<span><strong>IntelUniVen AI Copilot</strong><small>by IntelUniVen</small></span>}</button><div className="platform-status"><i/>{sidebar&&<span>© IntelUniVen Software Solutions Pvt. Ltd.</span>}</div></div>
     </aside>
     <div className="app-body">
-      <header className="topbar"><button className="mobile-menu" onClick={()=>setMobileNav(!mobileNav)}><Icon name="menu"/></button><button className="institution"><span className="institution-logo">{institution.includes("School")?"BI":institution.includes("College")?"BC":"BU"}</span><span><small>Institution</small><strong>{institution}</strong></span><Icon name="chevron" size={14}/></button><button className="global-search" onClick={()=>setSearch(true)}><Icon name="search"/><span>{role==="Student"?"Search my courses, lessons and work...":"Search within your authorized scope..."}</span><kbd>⌘ K</kbd></button><div className="top-actions"><FontSizeControl scale={fontScale} onChange={setFontScale}/><Button variant="ghost" icon="spark" onClick={()=>setCopilot(!copilot)}>AI Copilot</Button>{canCreate&&<Button variant="primary" icon="plus">Quick create</Button>}<button className="icon-btn"><Icon name="chat"/></button><button className="icon-btn has-alert"><Icon name="bell"/><i/></button><button className="icon-btn hide-tablet"><Icon name="help"/></button><button className="profile-button" onClick={()=>setRoleMenu(!roleMenu)}><Avatar initials={profile.initials} tone={2}/><span><strong>{profile.name}</strong><small>{role}</small></span><Icon name="chevron" size={14}/></button></div>{roleMenu&&<div className="role-menu"><span className="eyebrow">SWITCH EXPERIENCE</span>{(Object.keys(roleProfiles) as Role[]).map((r,i)=><button className={r===role?"active":""} key={r} onClick={()=>{setRole(r);setRoleMenu(false);navigate("Dashboard")}}><Avatar initials={roleProfiles[r].initials} tone={i}/><span><strong>{r}</strong><small>{r===role?"Current role":"Switch dashboard & access"}</small></span>{r===role&&<Icon name="check"/>}</button>)}<div className="role-menu-divider"/><button onClick={()=>{clearToken();setLiveSession(null);setRoleMenu(false);setAuthenticated(false)}}><span className="list-icon tone-amber"><Icon name="arrow"/></span><span><strong>Sign out</strong><small>Return to secure access gateway</small></span></button></div>}</header>
+      <header className="topbar"><button className="mobile-menu" onClick={()=>setMobileNav(!mobileNav)}><Icon name="menu"/></button><button className="institution"><span className="institution-logo">{institution.includes("School")?"BI":institution.includes("College")?"BC":"BU"}</span><span><small>Institution</small><strong>{institution}</strong></span><Icon name="chevron" size={14}/></button><button className="global-search" onClick={()=>setSearch(true)}><Icon name="search"/><span>{role==="Student"?"Search my courses, lessons and work...":"Search within your authorized scope..."}</span><kbd>⌘ K</kbd></button><div className="top-actions"><FontSizeControl scale={fontScale} onChange={setFontScale}/><Button variant="ghost" icon="spark" onClick={()=>setCopilot(!copilot)}>AI Copilot</Button>{canCreate&&<Button variant="primary" icon="plus" onClick={()=>navigate(role==="Administrator"?"Administration":"Assessments", role==="Administrator"?"Batches":"Question Bank")}>Quick create</Button>}<button className="icon-btn"><Icon name="chat"/></button><button className="icon-btn has-alert"><Icon name="bell"/><i/></button><button className="icon-btn hide-tablet"><Icon name="help"/></button><button className="profile-button" onClick={()=>setRoleMenu(!roleMenu)}><Avatar initials={profile.initials} tone={2}/><span><strong>{profile.name}</strong><small>{role}</small></span><Icon name="chevron" size={14}/></button></div>{roleMenu&&<div className="role-menu"><span className="eyebrow">SWITCH EXPERIENCE</span>{(Object.keys(roleProfiles) as Role[]).map((r,i)=><button className={r===role?"active":""} key={r} onClick={()=>{setRole(r);setRoleMenu(false);navigate("Dashboard")}}><Avatar initials={roleProfiles[r].initials} tone={i}/><span><strong>{r}</strong><small>{r===role?"Current role":"Switch dashboard & access"}</small></span>{r===role&&<Icon name="check"/>}</button>)}<div className="role-menu-divider"/><button onClick={()=>{clearToken();setLiveSession(null);setRoleMenu(false);setAuthenticated(false)}}><span className="list-icon tone-amber"><Icon name="arrow"/></span><span><strong>Sign out</strong><small>Return to secure access gateway</small></span></button></div>}</header>
       <div className="crumbbar"><div><button onClick={()=>navigate(module)}>{module}</button><Icon name="chevron" size={13}/><button onClick={()=>navigate(module,sub)}>{sub}</button>{detail&&<><Icon name="chevron" size={13}/><strong>{(()=>{const raw=detail.startsWith("cid:")?"Course":detail.includes(":")?(detail.split(":").at(-1)||detail):detail;try{return decodeURIComponent(raw)}catch{return raw}})()}</strong></>}</div><span className="demo-label">{liveSession?`LIVE API · ${liveSession.auth_mode.toUpperCase()}`:"DEMO ENVIRONMENT · SAMPLE DATA"}</span></div>
       <main className="main-content">{["Learning Intelligence","Learning Paths","AI Study Buddy","Adaptive Learning","Student Success","Assignments","Assessments","Gamification","Data Security & Privacy"].includes(module)?<div className="li-shell"><nav className={`li-subnav ${module!=="Learning Intelligence"?"deep-module-nav":""}`} aria-label={`${module} sections`}>{submodules[module].filter(item=>!(role==="Student"&&((module==="Assignments"&&item!=="Assignments")||(module==="Assessments"&&item!=="Assessments")))&&!(module==="Gamification"&&item==="Game Configuration"&&!["Teacher / Faculty","Administrator"].includes(role))&&!(role==="Training Coordinator"&&module==="Assessments"&&!(["Results","Proctoring"].includes(item)))).map((item,i)=><button className={sub===item?"active":""} key={item} onClick={()=>navigate(module,item)}><Icon name={(module==="Learning Paths"?["path","brain","warning","spark","assessment","trophy"]:module==="Gamification"?["library","trophy","assessment","file","chart","credential","ops"]:module==="Data Security & Privacy"?["shield","data","library","assessment","people","report"]:module==="Assessments"?["assessment","file","wand","calendar","file","grade","assessment","chart","shield"]:module==="Assignments"?["assignment","file","grade","assessment","shield","chat"]:module==="Student Success"?["home","student","warning","people","brain","success","shield","trend","check","chart","path"]:module==="Adaptive Learning"?["home","path","brain","data","chart","assessment","spark","credential","trophy","govern"]:module==="AI Study Buddy"?["chat","path","assessment","spark","calendar","clock","file","file","assessment","chart","spark","chat"]:["home","brain","wand","spark","path","chart"])[i] as IconName}/><span>{item}</span></button>)}</nav>{content}</div>:content}</main>
     </div>
-    {copilot&&<aside className="copilot-drawer"><div className="copilot-head"><div className="ai-avatar"><Icon name="spark"/></div><div><h2>IntelUniVen AI Copilot</h2><span><i/> Aware of {module}</span></div><button onClick={()=>setCopilot(false)}><Icon name="close"/></button></div><div className="copilot-context"><span className="eyebrow">CURRENT CONTEXT</span><strong>{module} / {sub}</strong><small>Responses respect your {role.toLowerCase()} permissions.</small></div><div className="copilot-chat"><div className="copilot-welcome"><div className="ai-orb"><Icon name="spark"/></div><h3>How can I help?</h3><p>I can analyze this page and help you take the next step.</p></div><button className="prompt-card">{contextPrompt}<Icon name="chevron"/></button>{["Summarize what needs attention","Explain the key trends","Recommend next actions"].map(x=><button className="prompt-card" key={x}>{x}<Icon name="chevron"/></button>)}</div><div className="copilot-input"><input placeholder={`Ask about ${module.toLowerCase()}...`}/><button><Icon name="send"/></button></div><small className="permission-note"><Icon name="shield" size={13}/> Role permissions and data privacy enforced</small></aside>}
+    {copilot&&<aside className="copilot-drawer"><div className="copilot-head"><div className="ai-avatar"><Icon name="spark"/></div><div><h2>IntelUniVen AI Copilot</h2><span><i/> Aware of {module}</span></div><button onClick={()=>setCopilot(false)}><Icon name="close"/></button></div><div className="copilot-context"><span className="eyebrow">CURRENT CONTEXT</span><strong>{module} / {sub}</strong><small>Responses respect your {role.toLowerCase()} permissions. Mock mode is labelled.</small></div><div className="copilot-chat"><div className="copilot-welcome"><div className="ai-orb"><Icon name="spark"/></div><h3>How can I help?</h3><p>{copilotReply||"Ask a question. The reply uses materials retrieved for your account, or says when none match."}</p></div><button className="prompt-card" onClick={()=>{setCopilotDraft(contextPrompt);}}>{contextPrompt}<Icon name="chevron"/></button>{["Summarize what needs attention","Explain the key trends","Recommend next actions"].map(x=><button className="prompt-card" key={x} onClick={()=>setCopilotDraft(x)}>{x}<Icon name="chevron"/></button>)}</div><div className="copilot-input"><input value={copilotDraft} onChange={e=>setCopilotDraft(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();void askCopilot(copilotDraft)}}} placeholder={`Ask about ${module.toLowerCase()}...`}/><button disabled={copilotBusy} onClick={()=>void askCopilot(copilotDraft)}><Icon name="send"/></button></div><small className="permission-note"><Icon name="shield" size={13}/> Role permissions and data privacy enforced</small></aside>}
     {search&&<div className="modal-backdrop" onClick={()=>setSearch(false)}><section className="search-modal" onClick={e=>e.stopPropagation()}><div className="search-modal-input"><Icon name="search"/><input autoFocus placeholder={role==="Student"?'Try "Continue my Oracle SQL training"':'Search within your authorized scope'}/><kbd>ESC</kbd></div><div className="search-content"><span className="eyebrow">SUGGESTED SEARCHES</span>{searchSuggestions.map(([x,target,icon],i)=><button key={x} onClick={()=>{setSearch(false);navigate(target)}}><span className={`list-icon tone-${i===1?"violet":"blue"}`}><Icon name={icon as IconName}/></span><span><strong>{x}</strong><small>{role==="Student"?"My authorized learning content":`${role} scope · Permission-aware`}</small></span><Icon name="chevron"/></button>)}</div><div className="search-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open</span><span><Icon name="shield" size={13}/> Results respect role permissions</span></div></section></div>}
   </div>;
 }

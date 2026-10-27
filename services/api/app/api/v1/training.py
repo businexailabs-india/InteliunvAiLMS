@@ -25,7 +25,7 @@ from app.schemas import (
     QuestionBankCreate,
     QuestionBankResponse,
 )
-from app.security.rbac import COORDINATOR_ROLES, TEACHER_ROLES, require_any
+from app.security.rbac import COORDINATOR_ROLES, TEACHER_ROLES, require_any, require_permission
 from app.services.audit import write_audit
 
 router = APIRouter(prefix="/api/v1", tags=["training"])
@@ -35,6 +35,7 @@ REVIEW_ROLES = {"content_reviewer", "coordinator", "principal_academic_director"
 CORPORATE_ROLES = {
     "corporate_hr",
     "corporate_trainer",
+    "coordinator",
     "institution_admin",
     "principal_academic_director",
     "platform_super_admin",
@@ -97,6 +98,7 @@ async def approve_question(
     session: AsyncSession = Depends(get_session),
 ) -> QuestionBankItem:
     require_any(context, REVIEW_ROLES)
+    require_permission(context, "content:review")
     item = await session.get(QuestionBankItem, item_id)
     if item is None or item.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Question not found")
@@ -216,6 +218,9 @@ async def add_cohort_members(
                 )
             )
             if enrollment is None:
+                from app.billing.entitlements import assert_student_seat
+
+                await assert_student_seat(session, context.institution_id)
                 session.add(
                     Enrollment(
                         institution_id=context.institution_id,
@@ -244,6 +249,7 @@ async def completion_report(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     require_any(context, CORPORATE_ROLES)
+    require_permission(context, "analytics:read")
     cohorts = list(
         await session.scalars(
             select(CorporateCohort).where(CorporateCohort.institution_id == context.institution_id)

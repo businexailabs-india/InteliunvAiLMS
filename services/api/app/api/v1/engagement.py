@@ -9,7 +9,9 @@ from app.db import get_session
 from app.models import (
     AiBudget,
     Assessment,
+    CourseInstructor,
     Invoice,
+    ParentLink,
     PointsLedger,
     ProctoringEvent,
     ProctoringSession,
@@ -25,7 +27,9 @@ from app.schemas import (
     ProctorReviewRequest,
     ProctorStartRequest,
 )
-from app.security.rbac import BILLING_ROLES, PROCTOR_REVIEW_ROLES, STAFF_ROLES, STUDENT_ROLES, TEACHER_ROLES, require_any
+from app.security.permissions import has_permission
+from app.security.rbac import PARENT_ROLES, STAFF_ROLES, STUDENT_ROLES, require_any_permission, require_permission
+from app.security.scope import assert_course_access, assessment_course_id, covers_every_course
 from app.services.audit import write_audit
 from app.services.integrity import identity_matches, integrity_rules, missing_checks
 
@@ -113,9 +117,11 @@ def compute_xp(payload: GamePlayRequest) -> int:
 
 
 async def standings(
-    session: AsyncSession, context: TenantContext
+    session: AsyncSession,
+    context: TenantContext,
+    visible_user_ids: set[UUID] | None = None,
 ) -> tuple[int, int, list[dict]]:
-    """Return (total_xp, rank, top-10 leaderboard) for the caller's tenant."""
+    """Return (total_xp, rank, leaderboard). None shows the institution; a set limits the audience."""
     total = int(
         await session.scalar(
             select(func.coalesce(func.sum(PointsLedger.xp), 0)).where(
@@ -125,12 +131,14 @@ async def standings(
         )
         or 0
     )
-    per_user = (
+    per_user_query = (
         select(PointsLedger.user_id.label("user_id"), func.sum(PointsLedger.xp).label("xp"))
         .where(PointsLedger.institution_id == context.institution_id)
         .group_by(PointsLedger.user_id)
-        .subquery()
     )
+    if visible_user_ids is not None:
+        per_user_query = per_user_query.where(PointsLedger.user_id.in_(visible_user_ids or {UUID(int=0)}))
+    per_user = per_user_query.subquery()
     ahead = int(
         await session.scalar(select(func.count()).select_from(per_user).where(per_user.c.xp > total))
         or 0
@@ -149,7 +157,22 @@ async def gamification(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    total, rank, board = await standings(session, context)
+    require_permission(context, "gamification:read")
+    visible: set[UUID] | None = None
+    if not covers_every_course(context.role_codes):
+        if set(context.role_codes) & PARENT_ROLES and not (set(context.role_codes) & STAFF_ROLES):
+            linked = set(
+                await session.scalars(
+                    select(ParentLink.student_id).where(
+                        ParentLink.institution_id == context.institution_id,
+                        ParentLink.parent_id == context.user_id,
+                    )
+                )
+            )
+            visible = linked
+        else:
+            visible = {context.user_id}
+    total, rank, board = await standings(session, context, visible)
     recent = list(
         await session.scalars(
             select(PointsLedger)
@@ -178,7 +201,7 @@ async def practice_deck(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    require_any(context, STUDENT_ROLES | PROCTOR_REVIEW_ROLES)
+    require_any_permission(context, {"gamification:read", "gamification:play"})
     if game not in {"quiz", "quick_quest"}:
         raise HTTPException(status_code=422, detail="Game must be quiz or quick_quest")
     questions = await _deck(session, context, game, course_id)
@@ -191,7 +214,7 @@ async def submit_practice(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    require_any(context, STUDENT_ROLES | TEACHER_ROLES)
+    require_permission(context, "gamification:play")
     learner = bool(set(context.role_codes) & STUDENT_ROLES) and not (set(context.role_codes) & STAFF_ROLES)
     if payload.game not in {"quiz", "quick_quest"}:
         raise HTTPException(status_code=422, detail="Game must be quiz or quick_quest")
@@ -276,7 +299,7 @@ async def play_game(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> GamePlayResponse:
-    require_any(context, STUDENT_ROLES)
+    require_permission(context, "gamification:play")
     raise HTTPException(
         status_code=422,
         detail="Submit answers to /api/v1/practice-deck/submit. A client-supplied score is not accepted.",
@@ -289,7 +312,7 @@ async def start_proctoring(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    require_any(context, STUDENT_ROLES)
+    require_permission(context, "proctoring:participate")
     if not payload.consent:
         raise HTTPException(status_code=400, detail="Explicit consent is required")
     assessment = await session.get(Assessment, payload.assessment_id)
@@ -360,8 +383,9 @@ async def add_proctor_event(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
+    require_permission(context, "proctoring:participate")
     item = await session.get(ProctoringSession, session_id)
-    if item is None or item.institution_id != context.institution_id:
+    if item is None or item.institution_id != context.institution_id or item.student_id != context.user_id:
         raise HTTPException(status_code=404, detail="Session not found")
     event = ProctoringEvent(
         institution_id=context.institution_id,
@@ -382,10 +406,22 @@ async def list_proctoring(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
-    require_any(context, PROCTOR_REVIEW_ROLES | STUDENT_ROLES)
+    require_any_permission(context, {"proctoring:participate", "proctoring:review"})
     query = select(ProctoringSession).where(ProctoringSession.institution_id == context.institution_id)
-    if set(context.role_codes) & STUDENT_ROLES and not (set(context.role_codes) & PROCTOR_REVIEW_ROLES):
+    has_review = has_permission(context.role_codes, "proctoring:review")
+    if not has_review:
         query = query.where(ProctoringSession.student_id == context.user_id)
+    if has_review and not covers_every_course(context.role_codes):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        owned = select(Assessment.id).where(
+            Assessment.institution_id == context.institution_id,
+            Assessment.course_id.in_(assigned),
+        )
+        query = query.where(ProctoringSession.assessment_id.in_(owned))
     if assessment_id:
         query = query.where(ProctoringSession.assessment_id == assessment_id)
     if decision:
@@ -403,16 +439,25 @@ async def list_proctoring(
     ]
 
 
+async def _reviewed_session(
+    session: AsyncSession, context: TenantContext, session_id: UUID
+) -> ProctoringSession:
+    require_permission(context, "proctoring:review")
+    item = await session.get(ProctoringSession, session_id)
+    if item is None or item.institution_id != context.institution_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    course_id = await assessment_course_id(session, context, item.assessment_id)
+    await assert_course_access(session, context, course_id, "proctoring:review")
+    return item
+
+
 @router.get("/proctoring/{session_id}/events")
 async def list_proctor_events(
     session_id: UUID,
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
-    require_any(context, PROCTOR_REVIEW_ROLES)
-    item = await session.get(ProctoringSession, session_id)
-    if item is None or item.institution_id != context.institution_id:
-        raise HTTPException(status_code=404, detail="Session not found")
+    item = await _reviewed_session(session, context, session_id)
     events = list(
         await session.scalars(
             select(ProctoringEvent).where(
@@ -434,15 +479,12 @@ async def review_proctoring(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    require_any(context, PROCTOR_REVIEW_ROLES)
     if payload.decision not in REVIEW_DECISIONS:
         raise HTTPException(
             status_code=422,
             detail=f"Decision must be one of {sorted(REVIEW_DECISIONS)}; only a human reviewer decides.",
         )
-    item = await session.get(ProctoringSession, session_id)
-    if item is None or item.institution_id != context.institution_id:
-        raise HTTPException(status_code=404, detail="Session not found")
+    item = await _reviewed_session(session, context, session_id)
     item.decision = payload.decision
     await write_audit(
         session,
@@ -461,7 +503,7 @@ async def billing(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    require_any(context, BILLING_ROLES)
+    require_permission(context, "billing:read")
     subscription = await session.scalar(
         select(Subscription).where(Subscription.institution_id == context.institution_id)
     )
@@ -493,7 +535,7 @@ async def update_ai_quota(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    require_any(context, BILLING_ROLES)
+    require_permission(context, "billing:manage")
     budget = await session.scalar(
         select(AiBudget).where(AiBudget.institution_id == context.institution_id)
     )

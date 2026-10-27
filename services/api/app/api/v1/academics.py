@@ -17,6 +17,7 @@ from app.models import (
     AttendanceRecord,
     Attempt,
     Course,
+    CourseInstructor,
     Enrollment,
     InstitutionMembership,
     ScheduledClass,
@@ -32,7 +33,10 @@ from app.security.rbac import (
     STUDENT_ROLES,
     TEACHER_ROLES,
     require_any,
+    require_any_permission,
+    require_permission,
 )
+from app.security.scope import assert_course_access, covers_every_course, ensure_instructor, reads_every_course
 from app.services.audit import write_audit
 
 router = APIRouter(prefix="/api/v1", tags=["academics"])
@@ -88,6 +92,7 @@ async def list_assignments(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
+    require_permission(context, "assignment:read")
     query = select(Assignment).where(Assignment.institution_id == context.institution_id)
     if course_id:
         query = query.where(Assignment.course_id == course_id)
@@ -100,6 +105,13 @@ async def list_assignments(
         query = query.where(Assignment.course_id.in_(enrolled))
     elif set(context.role_codes) & PARENT_ROLES and not set(context.role_codes) & STAFF_ROLES:
         raise HTTPException(status_code=403, detail="Assignments are not available to this role")
+    elif not covers_every_course(context.role_codes):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        query = query.where(Assignment.course_id.in_(assigned))
     assignments = list(await session.scalars(query.order_by(Assignment.title).limit(200)))
     ids = [a.id for a in assignments]
     mine: dict[UUID, Submission] = {}
@@ -161,9 +173,11 @@ async def list_submissions(
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
     require_any(context, TEACHER_ROLES | COORDINATOR_ROLES)
+    require_permission(context, "assignment:read")
     assignment = await session.get(Assignment, assignment_id)
     if assignment is None or assignment.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Assignment not found")
+    await assert_course_access(session, context, assignment.course_id, "assignment:read")
     rows = list(
         await session.scalars(
             select(Submission).where(
@@ -200,9 +214,16 @@ async def grade_submission(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     require_any(context, TEACHER_ROLES | COORDINATOR_ROLES)
+    require_permission(context, "assignment:grade")
     submission = await session.get(Submission, submission_id)
     if submission is None or submission.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Submission not found")
+    assignment = await session.get(Assignment, submission.assignment_id)
+    if assignment is None or assignment.institution_id != context.institution_id:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    await assert_course_access(session, context, assignment.course_id, "assignment:grade")
+    if submission.status not in {"submitted", "graded", "returned", "late"}:
+        raise HTTPException(status_code=409, detail="This submission cannot be graded")
     previous = submission.score
     submission.score = payload.score
     submission.feedback = payload.feedback
@@ -285,7 +306,8 @@ async def record_attendance(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     require_any(context, TEACHER_ROLES | COORDINATOR_ROLES)
-    await _course_or_404(session, context, payload.course_id)
+    require_permission(context, "attendance:mark")
+    await assert_course_access(session, context, payload.course_id, "attendance:mark")
     invalid = [e.status for e in payload.entries if e.status not in ATTENDANCE_STATUSES]
     if invalid:
         raise HTTPException(status_code=422, detail=f"Status must be one of {sorted(ATTENDANCE_STATUSES)}")
@@ -343,6 +365,7 @@ async def correct_attendance(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     require_any(context, COORDINATOR_ROLES)
+    require_permission(context, "attendance:update")
     record = await session.get(AttendanceRecord, record_id)
     if record is None or record.institution_id != context.institution_id:
         raise HTTPException(status_code=404, detail="Attendance record not found")
@@ -373,7 +396,7 @@ async def directory(
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
     """Search people in the caller's own tenant (used to add cohort members)."""
-    require_any(context, ROSTER_ROLES | {"corporate_hr"})
+    require_any_permission(context, {"user:read", "cohort:manage"})
     limit = max(1, min(limit, 50))
     query = (
         select(User)
@@ -404,7 +427,11 @@ async def roster(
 ) -> dict:
     """Per-learner progress, attendance and score summary for one course."""
     require_any(context, ROSTER_ROLES)
-    course = await _course_or_404(session, context, course_id)
+    require_permission(context, "course:read")
+    if reads_every_course(context.role_codes):
+        course = await _course_or_404(session, context, course_id)
+    else:
+        course = await assert_course_access(session, context, course_id, "course:read")
     enrollments = list(
         await session.scalars(
             select(Enrollment)
@@ -511,6 +538,7 @@ async def list_classes(
     context: TenantContext = Depends(get_tenant_context),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
+    require_permission(context, "course:read")
     query = select(ScheduledClass).where(ScheduledClass.institution_id == context.institution_id)
     roles = set(context.role_codes)
     if roles & STUDENT_ROLES and not roles & STAFF_ROLES:
@@ -519,6 +547,13 @@ async def list_classes(
             Enrollment.student_id == context.user_id,
         )
         query = query.where(ScheduledClass.course_id.in_(enrolled))
+    elif not reads_every_course(context.role_codes):
+        assigned = select(CourseInstructor.course_id).where(
+            CourseInstructor.institution_id == context.institution_id,
+            CourseInstructor.user_id == context.user_id,
+            CourseInstructor.active.is_(True),
+        )
+        query = query.where(ScheduledClass.course_id.in_(assigned))
     rows = list(await session.scalars(query.order_by(ScheduledClass.starts_at).limit(200)))
     courses = {
         course.id: course.title
@@ -540,7 +575,8 @@ async def create_class(
     require_any(context, CLASS_AUTHORS)
     if set(context.role_codes) & STUDENT_ROLES and not set(context.role_codes) & STAFF_ROLES:
         raise HTTPException(status_code=403, detail="Students cannot schedule an instructor-led class")
-    await _course_or_404(session, context, payload.course_id)
+    await assert_course_access(session, context, payload.course_id, "course:read")
+    await ensure_instructor(session, context, payload.course_id, context.user_id)
     timezone_name = require_timezone(payload.timezone)
     item = ScheduledClass(
         institution_id=context.institution_id,

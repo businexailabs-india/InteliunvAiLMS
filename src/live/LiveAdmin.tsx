@@ -295,6 +295,8 @@ type UsageData = { quota: number; used: number; events: { feature: string; provi
 /** Subscription, invoices and AI token quota for the tenant. */
 export function LiveBilling() {
   const billing = useApi<BillingData>("/api/v1/billing");
+  const subscription = useApi<{ status: string; renews_at?: string | null; display?: string; currency?: string; plan?: { name: string } | null }>("/api/v1/billing/subscription");
+  const entitlements = useApi<{ features: Record<string, boolean>; plan?: string }>("/api/v1/billing/entitlements");
   const usage = useApi<UsageData>("/api/v1/ai/usage");
   const [quota, setQuota] = useState("");
   const action = useAction();
@@ -305,7 +307,7 @@ export function LiveBilling() {
       <Title
         tag="BILLING · LIVE"
         title="Subscription & AI Usage"
-        copy="Plan, invoices (synthetic) and the tenant's monthly AI token quota. Quota changes are audited."
+        copy="Plan, invoices, and the tenant AI quota. A paid plan becomes active only after the server verifies the payment."
       />
       <Notice text={action.ok} tone="success" />
       <Notice text={action.fail} tone="danger" />
@@ -317,6 +319,21 @@ export function LiveBilling() {
           <Metric label="AI TOKENS USED" value={usage.data ? usage.data.used.toLocaleString() : "—"} note={usage.data ? `${pct}% of ${usage.data.quota.toLocaleString()}` : ""} />
           <Metric label="INVOICES" value={billing.data.invoices.length} />
         </div>
+      ) : null}
+      {subscription.data ? (
+        <section className="card">
+          <span className="eyebrow">SUBSCRIPTION</span>
+          <p>
+            {subscription.data.plan?.name ?? "No plan"} · {subscription.data.status}
+            {subscription.data.display ? ` · ${subscription.data.display} ${subscription.data.currency ?? ""}` : ""}
+            {subscription.data.renews_at ? ` · renews ${new Date(subscription.data.renews_at).toLocaleDateString()}` : ""}
+          </p>
+          {entitlements.data?.features ? (
+            <p>{Object.entries(entitlements.data.features).filter(([, on]) => on).map(([name]) => name.replaceAll("_", " ")).join(", ") || "No extra features"}</p>
+          ) : null}
+          <Btn variant="secondary" disabled={action.busy} onClick={() => action.run(async () => { await send("POST", "/api/v1/billing/subscription/cancel", { at_period_end: true }); subscription.reload(); return "Cancellation is scheduled for the end of the period."; })}>Cancel at period end</Btn>
+          <Btn variant="primary" disabled={action.busy} onClick={() => action.run(async () => { await send("POST", "/api/v1/billing/subscription/reactivate"); subscription.reload(); return "Subscription reactivated."; })}>Reactivate</Btn>
+        </section>
       ) : null}
       {usage.data ? (
         <section className="card form-grid">
@@ -398,9 +415,9 @@ export function LiveCompletionReport() {
   return (
     <div className="page-stack">
       <Title
-        tag="L&D · COHORT COMPLETION"
-        title="Cohort Completion Report"
-        copy="Members, average progress and the share who passed an assessment for each corporate cohort. A pass is a score of 60% or higher."
+        tag="BATCHES"
+        title="Batches"
+        copy="A batch is a cohort tied to one course. Create it here, then add students from the directory. Completion counts members who scored 60% or higher."
       />
       <Notice text={action.ok} tone="success" />
       <Notice text={action.fail} tone="danger" />
@@ -521,7 +538,7 @@ export function LivePersonalRecord({ module, parent }: { module: "Attendance" | 
       <Title
         tag="PRIVATE LEARNER RECORD"
         title={module === "Attendance" ? "Attendance" : "Results"}
-        copy={parent ? "Records for your linked learners only. Results appear after a coordinator publishes them." : "Your own records. You can confirm attendance only for yourself."}
+        copy={module === "Gradebook" ? "Published scores only. A coordinator publishes them from Assessments, then Results." : parent ? "Records for your linked learners only. Results appear after a coordinator publishes them." : "Your own records. You can confirm attendance only for yourself."}
         actions={
           module === "Attendance" && !parent ? (
             <Btn
@@ -572,7 +589,7 @@ export function LivePersonalRecord({ module, parent }: { module: "Attendance" | 
           {!attRows.length ? <Empty title="No attendance recorded yet" /> : null}
           <section className="card">
             {attRows.map((row) => (
-              <div className="scope-row" key={row.id}>
+              <div className="scope-row record" key={row.id}>
                 <span>
                   <strong>{courseName.get(row.course_id) ?? "Course"}</strong>
                   <small>
@@ -596,7 +613,7 @@ export function LivePersonalRecord({ module, parent }: { module: "Attendance" | 
           {!results.data.length ? <Empty title="No published results yet" hint="Results show here once your coordinator approves the scorecard." /> : null}
           <section className="card">
             {results.data.map((row) => (
-              <div className="scope-row" key={row.id}>
+              <div className="scope-row record" key={row.id}>
                 <span>
                   <strong>{assessmentName.get(row.assessment_id) ?? "Assessment"}</strong>
                   <small>{row.status}</small>

@@ -12,6 +12,7 @@ from app.db import get_session, set_request_context
 from app.models import Institution, InstitutionMembership, Role, User, UserRoleAssignment
 from app.passwords import hash_password, verify_password
 from app.schemas import DemoLoginRequest, RegisterRequest, SessionResponse
+from app.security.permissions import effective_permissions
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -111,6 +112,7 @@ async def demo_login(
         institution_name=institution.name,
         institution_slug=institution.slug,
         roles=roles,
+        permissions=sorted(effective_permissions(roles)),
         auth_mode="demo",
         synthetic=True,
     )
@@ -235,6 +237,7 @@ async def register(
         institution_name=institution_name,
         institution_slug=institution_slug,
         roles=[role_code],
+        permissions=sorted(effective_permissions([role_code])),
         auth_mode="demo",
         synthetic=True,
     )
@@ -258,6 +261,7 @@ async def me(
         institution_name=institution.name,
         institution_slug=institution.slug,
         roles=list(context.role_codes),
+        permissions=sorted(effective_permissions(context.role_codes)),
         auth_mode=settings.auth_mode,
         synthetic=True,
     )

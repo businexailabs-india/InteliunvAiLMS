@@ -13,7 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import get_settings
 
-TENANT_TABLES = ["courses", "enrollments", "assessments", "attempts", "audit_logs", "question_bank_items"]
+TENANT_TABLES = [
+    "courses",
+    "course_instructors",
+    "enrollments",
+    "assessments",
+    "attempts",
+    "audit_logs",
+    "question_bank_items",
+]
 
 
 def run(coro):

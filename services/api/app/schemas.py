@@ -47,8 +47,14 @@ class SessionResponse(BaseModel):
     institution_name: str
     institution_slug: str
     roles: list[str]
+    permissions: list[str] = []
     auth_mode: str
     synthetic: bool = True
+
+
+class RoleAssignmentRequest(BaseModel):
+    user_id: UUID
+    role_code: str = Field(min_length=2, max_length=80)
 
 
 class CourseCreate(BaseModel):
@@ -305,4 +311,26 @@ class DashboardResponse(BaseModel):
     metrics: dict
     courses: list[CourseResponse]
     notifications: list[dict]
+    schedule: list[dict] = []
+    alerts: list[dict] = []
+    activity: list[dict] = []
+    overview: list[dict] = []
     generated_at: datetime
+
+
+class TeachingNoteCreate(BaseModel):
+    kind: str
+    title: str = Field(min_length=2, max_length=240)
+    body: str = Field(min_length=1, max_length=8000)
+    course_id: UUID | None = None
+
+
+class TeachingNoteResponse(BaseModel):
+    id: UUID
+    kind: str
+    title: str
+    body: str
+    status: str
+    course_id: UUID | None
+    author_name: str
+    created_at: datetime

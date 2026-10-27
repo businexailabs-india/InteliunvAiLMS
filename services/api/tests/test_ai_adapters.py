@@ -11,6 +11,7 @@ from app.ai.providers import (
     GeminiProvider,
     OpenAIProvider,
     ProviderError,
+    VertexGeminiProvider,
     get_provider,
 )
 from app.config import Settings
@@ -75,6 +76,16 @@ def test_client_errors_are_not_retried() -> None:
     assert len(seen) == 1
 
 
+def test_timeout_maps_to_provider_error() -> None:
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    provider = OpenAIProvider("k", transport=httpx.MockTransport(boom), backoff=0, max_retries=0)
+    with pytest.raises(ProviderError) as error:
+        run(provider.generate("hi"))
+    assert "ReadTimeout" in str(error.value)
+
+
 def test_network_failure_maps_to_provider_error() -> None:
     def boom(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("down", request=request)
@@ -132,3 +143,59 @@ def test_factory_builds_real_provider_only_with_credentials() -> None:
     configured = Settings(ai_provider="azure_openai", azure_openai_api_key="k", azure_openai_endpoint="https://x")
     assert get_provider(configured).name == "azure_openai"
     assert get_provider(Settings(ai_provider="gemini", gemini_api_key="k")).name == "gemini"
+    vertex = Settings(ai_provider="gemini", gemini_backend="vertex", gemini_project="ailms-512613", gemini_location="asia-south1")
+    provider = get_provider(vertex)
+    assert provider.name == "gemini" and provider.mock is False
+    assert get_provider(Settings(ai_provider="gemini", gemini_backend="vertex")).name == "mock"
+
+
+def test_vertex_gemini_uses_the_metadata_token_and_does_not_echo_it() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "metadata.google.internal":
+            assert request.headers["metadata-flavor"] == "Google"
+            return httpx.Response(200, json={"access_token": "ya29-test-token", "token_type": "Bearer"})
+        assert request.headers["authorization"] == "Bearer ya29-test-token"
+        assert request.url.host == "asia-south1-aiplatform.googleapis.com"
+        assert "/projects/ailms-512613/" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [{"content": {"parts": [{"text": "pong"}]}}],
+                "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 1},
+            },
+        )
+
+    provider = VertexGeminiProvider(
+        "ailms-512613",
+        "asia-south1",
+        "gemini-2.0-flash",
+        transport=httpx.MockTransport(handler),
+        backoff=0,
+    )
+    result = run(provider.generate("ping"))
+    assert result.text == "pong" and result.mock is False and result.provider == "gemini"
+
+
+def test_vertex_global_uses_the_unprefixed_host() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "metadata.google.internal":
+            return httpx.Response(200, json={"access_token": "ya29-test-token"})
+        seen["host"] = request.url.host
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "pong"}]}}]})
+
+    provider = VertexGeminiProvider("ailms-512613", "global", "gemini-3.8-flash", transport=httpx.MockTransport(handler), backoff=0)
+    run(provider.generate("ping"))
+    assert seen["host"] == "aiplatform.googleapis.com"
+
+
+def test_vertex_token_failure_does_not_include_the_response_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="secret-token-body")
+
+    provider = VertexGeminiProvider("p", "asia-south1", transport=httpx.MockTransport(handler), backoff=0, max_retries=0)
+    with pytest.raises(ProviderError) as error:
+        run(provider.generate("ping"))
+    assert "secret-token-body" not in str(error.value)
+    assert "HTTP 403" in str(error.value)

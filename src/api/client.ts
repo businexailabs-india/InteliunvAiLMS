@@ -15,6 +15,7 @@ export type Session = {
   institution_name: string
   institution_slug: string
   roles: string[]
+  permissions?: string[]
   auth_mode: string
   synthetic: boolean
 }
@@ -39,6 +40,10 @@ export type DashboardRecord = {
   metrics: Record<string, unknown>
   courses: CourseRecord[]
   notifications: { id: string; title: string; body: string; read: boolean }[]
+  schedule?: { title: string; course: string; when: string; today: boolean }[]
+  alerts?: { title: string; detail: string; module: string; sub: string }[]
+  activity?: { label: string; completions: number }[]
+  overview?: { name: string; signal: string; status: string }[]
 }
 
 export type Dashboard = DashboardRecord

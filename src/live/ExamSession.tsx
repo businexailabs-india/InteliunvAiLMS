@@ -195,7 +195,7 @@ export function StudentExamCenter({ navigate }: { navigate: (module: string, sub
       <Title tag="MY ASSESSMENTS" title="Assessment Center" copy="Open an assessment to see which checks are required before any question is shown." />
       {!(exams.data ?? []).length ? <Empty title="No assessments are published" /> : null}
       {(exams.data ?? []).map((item) => (
-        <button className="scope-row card" key={item.id} onClick={() => { setExamId(item.id); setPhase(item.proctored || Object.values(item.checks ?? {}).includes("required") ? "checks" : "exam"); }}>
+        <button className="scope-row record card" key={item.id} onClick={() => { setExamId(item.id); setPhase(item.proctored || Object.values(item.checks ?? {}).includes("required") ? "checks" : "exam"); }}>
           <span><strong>{item.title}</strong><small>{item.proctored ? "Proctored · required checks must pass" : "Open · device checks are not required"}</small></span>
           <Badge tone={item.proctored ? "warning" : "success"}>{item.proctored ? "CHECKS REQUIRED" : "START"}</Badge>
         </button>
